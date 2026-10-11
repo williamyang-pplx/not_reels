@@ -1,0 +1,71 @@
+{
+  "name": "next-14-rtt150",
+  "target": "nr-bench-next",
+  "mode": "docker",
+  "path": "/?type=FORUM",
+  "measuredAt": "2026-10-11T18:52:03.624Z",
+  "config": {
+    "memory": "512m",
+    "cpus": "1",
+    "cpuThrottle": 4,
+    "rttMs": 150,
+    "coldRuns": 5,
+    "warmRuns": 30,
+    "lhRuns": 3,
+    "clickRuns": 5
+  },
+  "notes": [
+    "cold: skipped",
+    "warm: skipped",
+    "js: skipped",
+    "lighthouse: skipped"
+  ],
+  "coldStart": null,
+  "warm": null,
+  "js": null,
+  "lighthouse": null,
+  "pill": {
+    "ms": 44.60000014305115,
+    "pill": "TECHNOLOGY",
+    "samples": [
+      351.9,
+      46.3,
+      33.7,
+      44.6,
+      33.9
+    ]
+  },
+  "pillFresh": {
+    "ms": 336.69999980926514,
+    "pills": [
+      "TECHNOLOGY",
+      "NEWS",
+      "SCIENCE",
+      "CULTURE",
+      "POLITICS"
+    ],
+    "samples": [
+      351,
+      336.7,
+      340.7,
+      334.3,
+      320.6
+    ]
+  },
+  "hide": {
+    "ms": 324.2999999523163,
+    "samples": [
+      326.9,
+      324.3,
+      323.1,
+      323.7,
+      326.8
+    ]
+  },
+  "memory": {
+    "peakUsageMb": 181.8,
+    "peakRssMb": 246.4,
+    "peakAnonMb": 104.1,
+    "samples": 103
+  }
+}

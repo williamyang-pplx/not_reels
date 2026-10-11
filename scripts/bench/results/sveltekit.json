@@ -1,0 +1,235 @@
+{
+  "name": "sveltekit",
+  "target": "nr-bench-sveltekit",
+  "mode": "docker",
+  "path": "/?type=FORUM",
+  "measuredAt": "2026-10-11T18:51:09.193Z",
+  "config": {
+    "memory": "512m",
+    "cpus": "1",
+    "cpuThrottle": 4,
+    "rttMs": 0,
+    "coldRuns": 5,
+    "warmRuns": 30,
+    "lhRuns": 3,
+    "clickRuns": 5
+  },
+  "notes": [],
+  "coldStart": {
+    "medianMs": 194,
+    "samples": [
+      195.6,
+      159.7,
+      194,
+      161.9,
+      194.6
+    ],
+    "primingMs": 241.7,
+    "floorMedianMs": 137.1,
+    "floorSamples": [
+      137,
+      150.7,
+      137.1,
+      125.9,
+      137.2
+    ]
+  },
+  "warm": {
+    "ttfbMs": 3.1729373931884766,
+    "totalMs": 3.2871665954589844,
+    "ttfbSamples": [
+      3.41,
+      3.15,
+      3.22,
+      3.36,
+      3.35,
+      3.18,
+      3.3,
+      3.19,
+      3.34,
+      3.9,
+      3.15,
+      3.17,
+      2.94,
+      3.18,
+      3.2,
+      3.15,
+      3.15,
+      3.65,
+      19.32,
+      3.77,
+      3.36,
+      2.93,
+      3.01,
+      2.91,
+      2.91,
+      2.73,
+      2.87,
+      2.98,
+      2.9,
+      2.74
+    ]
+  },
+  "js": {
+    "jsGzKb": 37.6,
+    "jsGzFirstPartyKb": 37.6,
+    "jsGzThirdPartyKb": 0,
+    "htmlGzKb": 16.7,
+    "cssGzKb": 7.3,
+    "fontKb": 21.5,
+    "totalGzKb": 61.7,
+    "scripts": [
+      {
+        "url": "http://127.0.0.1:3900/_app/immutable/entry/start.CDD1ou05.js",
+        "rawBytes": 548,
+        "gzBytes": 321,
+        "thirdParty": false
+      },
+      {
+        "url": "http://127.0.0.1:3900/_app/immutable/chunks/Bj5vl0pZ.js",
+        "rawBytes": 39182,
+        "gzBytes": 15149,
+        "thirdParty": false
+      },
+      {
+        "url": "http://127.0.0.1:3900/_app/immutable/chunks/CRzLMJPS.js",
+        "rawBytes": 1534,
+        "gzBytes": 798,
+        "thirdParty": false
+      },
+      {
+        "url": "http://127.0.0.1:3900/_app/immutable/entry/payload.DSmR2FwN.js",
+        "rawBytes": 65,
+        "gzBytes": 77,
+        "thirdParty": false
+      },
+      {
+        "url": "http://127.0.0.1:3900/_app/immutable/chunks/DQChWfrv.js",
+        "rawBytes": 52,
+        "gzBytes": 69,
+        "thirdParty": false
+      },
+      {
+        "url": "http://127.0.0.1:3900/_app/immutable/chunks/TMkWQssV.js",
+        "rawBytes": 4346,
+        "gzBytes": 1956,
+        "thirdParty": false
+      },
+      {
+        "url": "http://127.0.0.1:3900/_app/immutable/entry/app.DQKNNwRH.js",
+        "rawBytes": 1152,
+        "gzBytes": 587,
+        "thirdParty": false
+      },
+      {
+        "url": "http://127.0.0.1:3900/_app/immutable/chunks/DEwZK6Lw.js",
+        "rawBytes": 43452,
+        "gzBytes": 15836,
+        "thirdParty": false
+      },
+      {
+        "url": "http://127.0.0.1:3900/_app/immutable/chunks/DfSgK8SK.js",
+        "rawBytes": 22,
+        "gzBytes": 42,
+        "thirdParty": false
+      },
+      {
+        "url": "http://127.0.0.1:3900/_app/immutable/nodes/0.DZnQFLsJ.js",
+        "rawBytes": 1952,
+        "gzBytes": 998,
+        "thirdParty": false
+      },
+      {
+        "url": "http://127.0.0.1:3900/_app/immutable/nodes/2.Ca2wFxE0.js",
+        "rawBytes": 5303,
+        "gzBytes": 2440,
+        "thirdParty": false
+      },
+      {
+        "url": "http://127.0.0.1:3900/_app/immutable/nodes/1.keIPqP9Q.js",
+        "rawBytes": 352,
+        "gzBytes": 259,
+        "thirdParty": false
+      }
+    ]
+  },
+  "lighthouse": {
+    "lcpMs": 1656,
+    "tbtMs": 0,
+    "fcpMs": 1656,
+    "siMs": 1656,
+    "cls": 0,
+    "score": 99,
+    "runs": [
+      {
+        "score": 99,
+        "fcpMs": 1656.0086999999999,
+        "lcpMs": 1656.0086999999999,
+        "tbtMs": 0,
+        "cls": 0,
+        "siMs": 1656.0086999999999
+      },
+      {
+        "score": 99,
+        "fcpMs": 1656.9129,
+        "lcpMs": 1656.9129,
+        "tbtMs": 0,
+        "cls": 0,
+        "siMs": 1656.9129
+      },
+      {
+        "score": 99,
+        "fcpMs": 1655.96205,
+        "lcpMs": 1655.96205,
+        "tbtMs": 0,
+        "cls": 0,
+        "siMs": 1655.96205
+      }
+    ],
+    "errors": []
+  },
+  "pill": {
+    "ms": 38,
+    "pill": "TECHNOLOGY",
+    "samples": [
+      43.7,
+      42,
+      33.8,
+      38,
+      32.9
+    ]
+  },
+  "pillFresh": {
+    "ms": 34.39999985694885,
+    "pills": [
+      "TECHNOLOGY",
+      "NEWS",
+      "SCIENCE",
+      "CULTURE",
+      "POLITICS"
+    ],
+    "samples": [
+      42.9,
+      34.4,
+      34.7,
+      33.6,
+      32.2
+    ]
+  },
+  "hide": {
+    "ms": 32.200000047683716,
+    "samples": [
+      41.6,
+      32.6,
+      31.8,
+      32.2,
+      31.1
+    ]
+  },
+  "memory": {
+    "peakUsageMb": 98.5,
+    "peakRssMb": 84,
+    "peakAnonMb": 33.7,
+    "samples": 93
+  }
+}

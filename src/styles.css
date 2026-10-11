@@ -1,0 +1,89 @@
+@font-face { font-family: Rambla; font-style: normal; font-weight: 400; font-display: optional; src: url(/fonts/rambla-400.woff2) format('woff2'); }
+@font-face { font-family: Rambla; font-style: normal; font-weight: 700; font-display: optional; src: url(/fonts/rambla-700.woff2) format('woff2'); }
+@font-face { font-family: Rambla; font-style: italic; font-weight: 400; font-display: optional; src: url(/fonts/rambla-400i.woff2) format('woff2'); }
+@font-face { font-family: Rambla; font-style: italic; font-weight: 700; font-display: optional; src: url(/fonts/rambla-700i.woff2) format('woff2'); }
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body { height: 100%; -webkit-tap-highlight-color: transparent; }
+html { color-scheme: dark; background: hsl(0 0% 4%); -webkit-text-size-adjust: 100%; }
+body { overscroll-behavior-y: none; }
+[hidden] { display: none !important; }
+a, button, label, select { touch-action: manipulation; }
+button { -webkit-user-select: none; user-select: none; }
+
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Nav: translucent + blur, like the original sticky header. */
+.nav { background: hsl(0 0% 4% / 0.82); -webkit-backdrop-filter: saturate(160%) blur(14px); backdrop-filter: saturate(160%) blur(14px); }
+
+.pill { transition: background-color .12s, color .12s, border-color .12s; white-space: nowrap; }
+.type-pill { background: transparent; color: hsl(0 0% 98%); border-color: hsl(0 0% 18%); }
+.type-pill[aria-current] { background: hsl(210 90% 56%); color: #fff; border-color: hsl(210 90% 56%); }
+.topic-pill { background: transparent; color: hsl(0 0% 64%); border-color: hsl(0 0% 18%); }
+.topic-pill[aria-current] { background: hsl(210 30% 20%); color: hsl(0 0% 98%); border-color: hsl(210 30% 20%); }
+.pill:active { transform: scale(.97); }
+
+.seg button { transition: background-color .12s, color .12s; }
+.seg button[aria-selected='true'] { background: hsl(210 90% 56%); color: #fff; }
+.seg button[aria-selected='false']:active { background: hsl(210 30% 20%); }
+
+/* Cards: short class names keep 100-card pages small; content-visibility skips layout and
+   paint for off-screen cards, which matters on phones. */
+@layer components {
+  .card { @apply rounded-lg bg-card p-4; content-visibility: auto; contain-intrinsic-size: auto 160px; }
+  .fc { @apply border-2; }
+  .sc { @apply border border-border; }
+  .embed { contain-intrinsic-size: auto 420px; }
+  .cl { @apply block rounded-md; margin: -4px; padding: 4px; transition: background-color .1s; }
+  .cl:active { background: hsl(0 0% 15% / .6); }
+  .meta { @apply flex items-center justify-between gap-2 mb-1.5 text-xs text-muted-foreground; }
+  .meta b { @apply font-bold truncate; }
+  .meta time { @apply shrink-0; }
+  .sc .meta { @apply mb-2; }
+  .card h3 { @apply font-bold leading-snug text-foreground; font-size: 17px; }
+  .sc .cl:active h3 { @apply underline; }
+  .sum { @apply mt-1 text-sm text-muted-foreground leading-snug line-clamp-2; }
+  .artist { @apply mt-0.5 text-sm text-muted-foreground leading-snug; }
+  .rym { @apply mt-2.5 space-y-0.5 text-sm leading-snug; }
+  .rym .m { @apply text-muted-foreground; }
+  .notes { @apply mt-2 text-sm text-muted-foreground whitespace-pre-line; }
+  .badges { @apply mt-2.5 flex items-center gap-2; }
+  .tb { @apply inline-flex items-center h-5 px-2 rounded-full font-bold uppercase tracking-wide text-black; font-size: 10px; }
+  .ty { @apply inline-flex items-center h-5 px-2 rounded-full uppercase tracking-wide bg-muted text-muted-foreground border border-border; font-size: 10px; }
+  .acts { @apply mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1; }
+  .acts button, .acts .ytm { @apply text-xs text-primary py-2 -my-2; }
+  .acts button:disabled { @apply opacity-50; }
+  .acts button:active, .acts .ytm:active { opacity: .6; }
+  .acts .m { @apply text-muted-foreground; }
+  .acts .d { @apply text-destructive; }
+  .acts .err { @apply text-xs text-destructive; }
+  .ytm { @apply inline-flex items-center gap-1.5; }
+  .ytm img { @apply h-4 w-4 shrink-0; }
+}
+.card.leaving { animation: leave .12s ease-in forwards; pointer-events: none; }
+.card.busy { opacity: .6; transition: opacity .1s; }
+@keyframes leave { to { opacity: 0; transform: scale(.98); } }
+
+.row-btn { font-size: .75rem; line-height: 1rem; padding: 0 .625rem; height: 1.875rem; border-radius: .375rem; border: 1px solid hsl(0 0% 18%); }
+.row-btn:active { background: hsl(210 30% 20%); }
+.row-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* YouTube facade (replaces lite-youtube). */
+.yt { cursor: pointer; }
+.yt-play { position: absolute; left: 50%; top: 50%; width: 68px; height: 48px; margin: -24px 0 0 -34px; border-radius: 14px; background: rgba(23,23,23,.85); transition: background-color .15s; }
+.yt-play::after { content: ''; position: absolute; left: 28px; top: 14px; border-style: solid; border-width: 10px 0 10px 16px; border-color: transparent transparent transparent #fff; }
+.yt:active .yt-play, .yt:hover .yt-play { background: #f00; }
+
+.modal { animation: fade .12s ease-out; }
+.modal .sheet { animation: rise .16s ease-out; max-height: calc(100dvh - 24px - env(safe-area-inset-top)); overflow-y: auto; margin-bottom: env(safe-area-inset-bottom); }
+@keyframes fade { from { opacity: 0; } }
+@keyframes rise { from { transform: translateY(12px); opacity: .6; } }
+
+/* Thin progress bar shown while a view is loading. */
+#bar { position: fixed; top: 0; left: 0; height: 2px; width: 100%; background: hsl(210 90% 56%); transform-origin: 0 0; transform: scaleX(0); opacity: 0; z-index: 60; pointer-events: none; }
+#bar.on { opacity: 1; transform: scaleX(.7); transition: transform 2s cubic-bezier(.1,.7,.2,1); }
+#bar.done { opacity: 0; transform: scaleX(1); transition: transform .15s, opacity .2s .1s; }

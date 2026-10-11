@@ -1,0 +1,62 @@
+{
+  "name": "next-14-no-migrate",
+  "target": "nr-bench-next",
+  "mode": "docker",
+  "path": "/?type=FORUM",
+  "measuredAt": "2026-10-11T18:52:59.814Z",
+  "config": {
+    "memory": "512m",
+    "cpus": "1",
+    "cpuThrottle": 4,
+    "rttMs": 0,
+    "coldRuns": 5,
+    "warmRuns": 10,
+    "lhRuns": 3,
+    "clickRuns": 5
+  },
+  "notes": [
+    "js: skipped",
+    "lighthouse: skipped",
+    "pill: skipped",
+    "pillfresh: skipped",
+    "hide: skipped"
+  ],
+  "coldStart": {
+    "medianMs": 463.1,
+    "samples": [
+      472.6,
+      463.1,
+      430.7,
+      459.5,
+      463.1
+    ],
+    "primingMs": 447.2
+  },
+  "warm": {
+    "ttfbMs": 11.393896102905273,
+    "totalMs": 12.27125072479248,
+    "ttfbSamples": [
+      12.03,
+      11.52,
+      10.91,
+      11.27,
+      11.01,
+      12.61,
+      11,
+      13.06,
+      12.98,
+      10.74
+    ]
+  },
+  "js": null,
+  "lighthouse": null,
+  "pill": null,
+  "pillFresh": null,
+  "hide": null,
+  "memory": {
+    "peakUsageMb": 104.2,
+    "peakRssMb": 232.2,
+    "peakAnonMb": 100.9,
+    "samples": 16
+  }
+}

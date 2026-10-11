@@ -1,0 +1,10 @@
+node_modules
+dist
+.env*
+*.log
+data/dev.db*
+*.db-wal
+*.db-shm
+coverage
+scripts/bench/results
+.git

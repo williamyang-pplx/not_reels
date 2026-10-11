@@ -1,0 +1,15 @@
+{
+  "name": "not-reels-bench",
+  "private": true,
+  "type": "module",
+  "description": "Framework benchmark harness for the not-reels feed page (see README.md)",
+  "scripts": {
+    "seed": "node seed.mjs",
+    "measure": "node measure.mjs",
+    "table": "node measure.mjs --table"
+  },
+  "dependencies": {
+    "lighthouse": "13.5.0",
+    "playwright-core": "1.64.0"
+  }
+}

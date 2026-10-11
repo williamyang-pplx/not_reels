@@ -1,0 +1,71 @@
+{
+  "name": "sveltekit-rtt150",
+  "target": "nr-bench-sveltekit",
+  "mode": "docker",
+  "path": "/?type=FORUM",
+  "measuredAt": "2026-10-11T18:52:25.256Z",
+  "config": {
+    "memory": "512m",
+    "cpus": "1",
+    "cpuThrottle": 4,
+    "rttMs": 150,
+    "coldRuns": 5,
+    "warmRuns": 30,
+    "lhRuns": 3,
+    "clickRuns": 5
+  },
+  "notes": [
+    "cold: skipped",
+    "warm: skipped",
+    "js: skipped",
+    "lighthouse: skipped"
+  ],
+  "coldStart": null,
+  "warm": null,
+  "js": null,
+  "lighthouse": null,
+  "pill": {
+    "ms": 178.89999985694885,
+    "pill": "TECHNOLOGY",
+    "samples": [
+      186.4,
+      178.9,
+      166.7,
+      178.9,
+      167.3
+    ]
+  },
+  "pillFresh": {
+    "ms": 170.39999985694885,
+    "pills": [
+      "TECHNOLOGY",
+      "NEWS",
+      "SCIENCE",
+      "CULTURE",
+      "POLITICS"
+    ],
+    "samples": [
+      192.6,
+      170.4,
+      172.5,
+      165.8,
+      164.8
+    ]
+  },
+  "hide": {
+    "ms": 164.20000004768372,
+    "samples": [
+      163.8,
+      165.4,
+      164.1,
+      164.2,
+      165.3
+    ]
+  },
+  "memory": {
+    "peakUsageMb": 31,
+    "peakRssMb": 79,
+    "peakAnonMb": 26.7,
+    "samples": 89
+  }
+}

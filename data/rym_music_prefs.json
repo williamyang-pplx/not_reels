@@ -1,0 +1,39 @@
+{
+  "decades": {
+    "1960": 1.0,
+    "1970": 1.0,
+    "1980": 1.0,
+    "1990": 1.0,
+    "2000": 1.0,
+    "2010": 1.0,
+    "2020": 1.0
+  },
+  "genres": {
+    "Alternative and Indie Rock": 1.0,
+    "Ambient and Drone": 0.4,
+    "Art and Indie Pop": 1.0,
+    "Blues": 1.0,
+    "Classical and Modern Composition": 0.8,
+    "Country and Americana": 0.5,
+    "Electronic": 1.0,
+    "Experimental and Noise": 1.0,
+    "Folk and Singer-Songwriter": 0.5,
+    "Funk and Disco": 0.7,
+    "Global and Regional Traditions": 1.0,
+    "Hip Hop": 0.2,
+    "Jazz": 1.0,
+    "Latin and Caribbean": 0.7,
+    "Metal": 0.2,
+    "Pop": 1.0,
+    "Pop Rock and Psychedelia": 1.0,
+    "Post-Rock and Shoegaze": 1.0,
+    "Progressive Rock": 1.0,
+    "Punk and Hardcore": 1.0,
+    "R&B and Soul": 0.7,
+    "Reggae Dub and Ska": 0.2,
+    "Rock": 1.0,
+    "Soundtrack Stage and Spoken Word": 1.0,
+    "Synth and Dance Pop": 1.0,
+    "Unclassified": 0.2
+  }
+}

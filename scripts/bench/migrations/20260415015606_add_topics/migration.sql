@@ -1,0 +1,6 @@
+-- CreateTable
+CREATE TABLE "Topic" (
+    "slug" TEXT NOT NULL PRIMARY KEY,
+    "label" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

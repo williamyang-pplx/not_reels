@@ -1,0 +1,223 @@
+{
+  "name": "next-14",
+  "target": "nr-bench-next",
+  "mode": "docker",
+  "path": "/?type=FORUM",
+  "measuredAt": "2026-10-11T18:50:09.522Z",
+  "config": {
+    "memory": "512m",
+    "cpus": "1",
+    "cpuThrottle": 4,
+    "rttMs": 0,
+    "coldRuns": 5,
+    "warmRuns": 30,
+    "lhRuns": 3,
+    "clickRuns": 5
+  },
+  "notes": [],
+  "coldStart": {
+    "medianMs": 762.9,
+    "samples": [
+      791.8,
+      780.9,
+      743.9,
+      744.5,
+      762.9
+    ],
+    "primingMs": 760.3,
+    "floorMedianMs": 147.7,
+    "floorSamples": [
+      169.5,
+      115.8,
+      127.5,
+      149.4,
+      147.7
+    ]
+  },
+  "warm": {
+    "ttfbMs": 10.981436967849731,
+    "totalMs": 11.908229112625122,
+    "ttfbSamples": [
+      10.86,
+      11.02,
+      9.21,
+      9.68,
+      11.67,
+      11.04,
+      11.01,
+      11.08,
+      11.09,
+      9.66,
+      11.17,
+      11.42,
+      9.55,
+      11.2,
+      11.08,
+      8.62,
+      11.09,
+      10.64,
+      11.15,
+      10.3,
+      10.68,
+      10.35,
+      10.96,
+      11.37,
+      9.6,
+      10.92,
+      11.2,
+      10.69,
+      11.1,
+      10.59
+    ]
+  },
+  "js": {
+    "jsGzKb": 119.2,
+    "jsGzFirstPartyKb": 115.4,
+    "jsGzThirdPartyKb": 3.8,
+    "htmlGzKb": 2.8,
+    "cssGzKb": 4.8,
+    "fontKb": 45.8,
+    "totalGzKb": 126.9,
+    "scripts": [
+      {
+        "url": "http://127.0.0.1:3900/_next/static/chunks/main-app-2b62e3e487c409bd.js",
+        "rawBytes": 463,
+        "gzBytes": 220,
+        "thirdParty": false
+      },
+      {
+        "url": "http://127.0.0.1:3900/_next/static/chunks/webpack-8062ea21d190ff22.js",
+        "rawBytes": 3572,
+        "gzBytes": 1679,
+        "thirdParty": false
+      },
+      {
+        "url": "http://127.0.0.1:3900/_next/static/chunks/413-4749ebde0005448a.js",
+        "rawBytes": 27667,
+        "gzBytes": 8479,
+        "thirdParty": false
+      },
+      {
+        "url": "http://127.0.0.1:3900/_next/static/chunks/128-84407f23a7888cf6.js",
+        "rawBytes": 22143,
+        "gzBytes": 6878,
+        "thirdParty": false
+      },
+      {
+        "url": "http://127.0.0.1:3900/_next/static/chunks/721-7709241624910034.js",
+        "rawBytes": 123493,
+        "gzBytes": 31561,
+        "thirdParty": false
+      },
+      {
+        "url": "http://127.0.0.1:3900/_next/static/chunks/app/page-9a97046b76a862c6.js",
+        "rawBytes": 14582,
+        "gzBytes": 4503,
+        "thirdParty": false
+      },
+      {
+        "url": "http://127.0.0.1:3900/_next/static/chunks/241ed237-99bbdc0268b966ed.js",
+        "rawBytes": 172831,
+        "gzBytes": 53637,
+        "thirdParty": false
+      },
+      {
+        "url": "http://127.0.0.1:3900/_next/static/chunks/app/layout-b002c54484c31213.js",
+        "rawBytes": 4033,
+        "gzBytes": 1737,
+        "thirdParty": false
+      },
+      {
+        "url": "http://127.0.0.1:3900/_next/static/chunks/660-795853a0213e3cbe.js",
+        "rawBytes": 29693,
+        "gzBytes": 9473,
+        "thirdParty": false
+      },
+      {
+        "url": "https://cdn.jsdelivr.net/gh/paulirish/lite-youtube-embed@master/src/lite-yt-embed.js",
+        "rawBytes": 10630,
+        "gzBytes": 3901,
+        "thirdParty": true
+      }
+    ]
+  },
+  "lighthouse": {
+    "lcpMs": 3166,
+    "tbtMs": 0,
+    "fcpMs": 760,
+    "siMs": 760,
+    "cls": 0,
+    "score": 93,
+    "runs": [
+      {
+        "score": 93,
+        "fcpMs": 759.9484,
+        "lcpMs": 3189.8968,
+        "tbtMs": 0,
+        "cls": 0,
+        "siMs": 759.9484
+      },
+      {
+        "score": 94,
+        "fcpMs": 760.3185000000001,
+        "lcpMs": 3020.6369999999997,
+        "tbtMs": 0,
+        "cls": 0,
+        "siMs": 760.3185000000001
+      },
+      {
+        "score": 93,
+        "fcpMs": 757.9550999999999,
+        "lcpMs": 3165.9102000000003,
+        "tbtMs": 0,
+        "cls": 0,
+        "siMs": 757.9550999999999
+      }
+    ],
+    "errors": []
+  },
+  "pill": {
+    "ms": 45,
+    "pill": "TECHNOLOGY",
+    "samples": [
+      66.3,
+      47.6,
+      35.1,
+      45,
+      32.8
+    ]
+  },
+  "pillFresh": {
+    "ms": 41.200000047683716,
+    "pills": [
+      "TECHNOLOGY",
+      "NEWS",
+      "SCIENCE",
+      "CULTURE",
+      "POLITICS"
+    ],
+    "samples": [
+      57.1,
+      41.2,
+      46.3,
+      33.9,
+      35.3
+    ]
+  },
+  "hide": {
+    "ms": 40.200000047683716,
+    "samples": [
+      63.3,
+      43.5,
+      40.2,
+      40.1,
+      39.5
+    ]
+  },
+  "memory": {
+    "peakUsageMb": 121.6,
+    "peakRssMb": 251.4,
+    "peakAnonMb": 108.3,
+    "samples": 115
+  }
+}
