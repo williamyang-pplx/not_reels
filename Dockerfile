@@ -14,14 +14,18 @@ RUN apt-get update -qq && \
 COPY package.json pnpm-lock.yaml ./
 RUN --mount=type=secret,id=npmrc,target=/root/.npmrc,required=false pnpm install --frozen-lockfile --prod=false
 COPY . .
-RUN pnpm run build && pnpm prune --prod
+# The server is one bundle; at runtime it only needs the better-sqlite3 native addon.
+RUN pnpm run build && \
+    mkdir -p /out/node_modules && \
+    cp -RL node_modules/better-sqlite3 /out/node_modules/ && \
+    rm -rf /out/node_modules/better-sqlite3/deps /out/node_modules/better-sqlite3/src
 
 # Runtime: the bundled server, the native sqlite addon, static files and the RYM data.
 FROM node:${NODE_VERSION}-slim
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/dist /app/dist
-COPY --from=build /app/node_modules /app/node_modules
+COPY --from=build /out/node_modules /app/node_modules
 COPY --from=build /app/package.json /app/package.json
 COPY public /app/public
 COPY data /app/data
