@@ -1,0 +1,71 @@
+{
+  "name": "hono-rtt150",
+  "target": "not-reels:latest",
+  "mode": "docker",
+  "path": "/?type=FORUM",
+  "measuredAt": "2026-10-11T19:19:14.893Z",
+  "config": {
+    "memory": "512m",
+    "cpus": "1",
+    "cpuThrottle": 4,
+    "rttMs": 150,
+    "coldRuns": 5,
+    "warmRuns": 30,
+    "lhRuns": 3,
+    "clickRuns": 5
+  },
+  "notes": [
+    "cold: skipped",
+    "warm: skipped",
+    "js: skipped",
+    "lighthouse: skipped"
+  ],
+  "coldStart": null,
+  "warm": null,
+  "js": null,
+  "lighthouse": null,
+  "pill": {
+    "ms": 18.299999952316284,
+    "pill": "TECHNOLOGY",
+    "samples": [
+      161.6,
+      17.8,
+      18.3,
+      19.3,
+      17.7
+    ]
+  },
+  "pillFresh": {
+    "ms": 166,
+    "pills": [
+      "TECHNOLOGY",
+      "NEWS",
+      "SCIENCE",
+      "CULTURE",
+      "POLITICS"
+    ],
+    "samples": [
+      161.9,
+      166.4,
+      166,
+      166,
+      167.9
+    ]
+  },
+  "hide": {
+    "ms": 13.800000190734863,
+    "samples": [
+      18.6,
+      14.1,
+      13.6,
+      13.8,
+      13.4
+    ]
+  },
+  "memory": {
+    "peakUsageMb": 47,
+    "peakRssMb": 88,
+    "peakAnonMb": 36.9,
+    "samples": 80
+  }
+}

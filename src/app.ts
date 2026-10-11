@@ -96,7 +96,7 @@ function staticFiles(roots: string[]): MiddlewareHandler {
         file = {
           type,
           raw,
-          cache: hashed ? 'public, max-age=31536000, immutable' : 'public, max-age=86400',
+          cache: hashed ? 'public, max-age=31536000, immutable' : rel === '/sw.js' ? 'no-cache' : 'public, max-age=86400',
         };
         if (COMPRESSIBLE.test(type) && raw.length > 512) {
           file.br = encode(raw, 'br', 11);

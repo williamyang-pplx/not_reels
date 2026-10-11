@@ -247,7 +247,16 @@ export function EmptyState(p: { message: string }): JSX  // W9
    reshuffle in Random mode). Other cached views are invalidated exactly as the spec's query-key rules say.
 5. **Data is server-rendered into the first HTML**, so the initial "Loading…" state only appears on client re-fetches.
 6. **docker-entrypoint.js removed**; `server.ts` migrates at boot (idempotent `CREATE TABLE IF NOT EXISTS`).
-7. Spec §2.1 step 3 says "stop and show the framework table before building". Per the user's instruction this run does
+7. **Service worker** (`client/sw.ts`, added after measuring): it caches the HTML routes stale-while-revalidate, so the PWA opens
+   instantly while a stopped Fly machine boots. The client swaps in fresh HTML once it arrives.
+8. **Save / Hide / saved-link Delete are optimistic**: the card leaves on tap and is restored, with an inline error, if the request fails.
+   The "Saving…" step is never visible as a result.
+9. **Reddit iframes start loading via IntersectionObserver ~300 px before view**, instead of the browser's 1250–2500 px
+   `loading=lazy` distance. Same iframe, src and sandbox.
+10. **Feed/saved links render only http(s) URLs as clickable** (`safeHref`), because the CSP allows inline script and a feed could ship `javascript:` links.
+11. HTML entities that feeds leave in titles and summaries (`What&#39;s`) are decoded for display only. Stored data is unchanged.
+12. **Topic delete shows the 409 error inline.** The original UI dropped it silently.
+13. **Spec §2.1 step 3 says "stop and show the framework table before building". Per the user's instruction this run does
    not stop; the table is written to `documentation/framework_choice.md` and summarized at the end.
 
 ## Open questions (recommended answer used)

@@ -175,3 +175,23 @@ describe('GET /_f/items', () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe('link safety', () => {
+  it('never renders a javascript: URL as a clickable href', async () => {
+    const { getDb } = await import('../src/db');
+    const { resetDb, createFeed } = await import('./helpers');
+    await resetDb();
+    const feed = await createFeed({ type: 'FORUM' });
+    getDb()
+      .prepare(
+        `INSERT INTO "FeedItem" ("id","feedId","guid","title","link","publishedAt","sourceRank","fetchedAt")
+         VALUES ('x1', ?, 'g-js', 'Evil', 'javascript:alert(1)', ?, 0, ?)`,
+      )
+      .run(feed.id, Date.now(), Date.now());
+    const { createApp } = await import('../src/app');
+    const html = await (await createApp().request('/?type=FORUM')).text();
+    expect(html).toContain('Evil');
+    expect(html).not.toMatch(/\shref="javascript:/);
+    expect(html).toContain('data-href="javascript:alert(1)"');
+  });
+});

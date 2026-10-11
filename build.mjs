@@ -26,6 +26,16 @@ const jsName = `app.${createHash('sha256').update(js).digest('hex').slice(0, 10)
 writeFileSync(`dist/public/${jsName}`, js);
 
 await build({
+  entryPoints: ['client/sw.ts'],
+  outfile: 'dist/public/sw.js',
+  bundle: true,
+  minify: true,
+  format: 'iife',
+  target: ['es2020', 'safari15'],
+  define: { __APP_JS__: JSON.stringify(`/${jsName}`) },
+});
+
+await build({
   entryPoints: ['src/server.ts'],
   outdir: 'dist',
   outExtension: { '.js': '.mjs' },

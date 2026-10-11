@@ -58,7 +58,9 @@ export function Document({ children }: { children: Child }) {
           <script src={js} defer></script>
         </head>
         <body class="bg-background text-foreground min-h-screen font-rambla antialiased">
-          <div id="app">{children}</div>
+          <div id="app" data-rendered={Date.now()}>
+            {children}
+          </div>
         </body>
       </html>
     </>
@@ -162,7 +164,7 @@ export function FeedPage({
   if (topic !== 'ALL') sp.set('topic', topic);
   return (
     <div class="flex flex-col gap-3 pt-3" data-testid="feed-list" data-view="feed" data-current-sort={sort}>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <button
           type="button"
           data-act="refresh"
@@ -185,7 +187,7 @@ export function FeedPage({
             </button>
           ))}
         </div>}
-        <span class="text-xs text-muted-foreground ml-auto text-right leading-tight" data-testid="refresh-status" hidden></span>
+        <span class="text-xs text-muted-foreground ml-auto whitespace-nowrap" data-testid="refresh-status" hidden></span>
       </div>
       <div class="feed-items flex flex-col gap-3">
         {'error' in data ? (

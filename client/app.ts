@@ -86,6 +86,24 @@ function invalidate(...kinds: Kind[]) {
   for (const key of cache.keys()) {
     if (kinds.includes(kindOf(key.split('?')[0]))) cache.delete(key);
   }
+  refreshPageCache();
+}
+
+let pageCacheTimer = 0;
+/**
+ * The service worker keeps whole pages for instant launch. After a mutation, drop them and
+ * re-cache the current page from the (now warm) server so the next launch isn't stale.
+ */
+function refreshPageCache() {
+  if (!('caches' in window)) return;
+  clearTimeout(pageCacheTimer);
+  pageCacheTimer = window.setTimeout(async () => {
+    await caches.delete('pages-v1');
+    if (!navigator.serviceWorker?.controller) return;
+    const url = location.pathname + location.search;
+    const res = await fetch(url).catch(() => null);
+    if (res?.ok) await (await caches.open('pages-v1')).put(url, res);
+  }, 600);
 }
 
 function prefetch(href: string) {
@@ -171,7 +189,28 @@ function emptyState(message: string) {
 
 let observer: IntersectionObserver | null = null;
 
+// Reddit embeds pull in a lot of third-party JS, so start each one only when its card is
+// about to scroll into view (the browser's own lazy-loading starts them 1250-2500px early).
+const frameObserver =
+  'IntersectionObserver' in window
+    ? new IntersectionObserver(
+        (entries) => {
+          for (const e of entries) {
+            if (!e.isIntersecting) continue;
+            const f = e.target as HTMLIFrameElement;
+            f.src = f.dataset.src!;
+            frameObserver!.unobserve(f);
+          }
+        },
+        { rootMargin: '300px 0px' },
+      )
+    : null;
+
 function hydrate() {
+  for (const f of $$<HTMLIFrameElement>('iframe[data-src]:not([src])')) {
+    if (frameObserver) frameObserver.observe(f);
+    else f.src = f.dataset.src!;
+  }
   const status = $('[data-testid="refresh-status"]');
   if (status && refreshStatus) {
     status.textContent = refreshStatus;
@@ -233,30 +272,20 @@ function cleanUrl(input: string): string {
   return u.toString();
 }
 
-/** The item URL exactly as stored: the raw href of the card's first link. */
+/** The item URL exactly as stored: the raw href of the card's first link (or data-href when it isn't http). */
 function linkOf(card: HTMLElement): string {
-  return $('a', card)!.getAttribute('href') ?? '';
+  return card.dataset.href ?? $('a', card)!.getAttribute('href') ?? '';
 }
 
 function openTab(url: string) {
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
-/** Fade a card out and swap it for an invisible marker, so it can be put back if the request fails. */
-function detachCard(card: HTMLElement): Promise<Comment> {
-  return new Promise((resolve) => {
-    card.classList.add('leaving');
-    card.addEventListener(
-      'animationend',
-      () => {
-        const marker = document.createComment('card');
-        card.replaceWith(marker);
-        card.classList.remove('leaving');
-        resolve(marker);
-      },
-      { once: true },
-    );
-  });
+/** Take a card out of the list right away, leaving a marker so it can be put back on failure. */
+function detachCard(card: HTMLElement): Comment {
+  const marker = document.createComment('card');
+  card.replaceWith(marker);
+  return marker;
 }
 
 /** After cards are gone for good: re-render if the list is now empty, else re-cache this view. */
@@ -267,7 +296,7 @@ function settleList(markers: Comment[]) {
 }
 
 /**
- * Save / Hide are optimistic: the card starts leaving on tap and is restored, with the error
+ * Save / Hide are optimistic: the card leaves on tap and is restored, with the error
  * shown inline, only if the server rejects the request.
  */
 async function cardMutation(btn: HTMLButtonElement, card: HTMLElement, kind: 'save' | 'hide') {
@@ -280,7 +309,7 @@ async function cardMutation(btn: HTMLButtonElement, card: HTMLElement, kind: 'sa
   err.hidden = true;
   // Every copy of this URL drops out of the stream.
   const cards = $$<HTMLElement>('[data-testid="feed-card"]').filter((c) => linkOf(c) === link);
-  const detached = Promise.all(cards.map(detachCard));
+  const markers = cards.map(detachCard);
   try {
     if (kind === 'save') {
       const title = card.dataset.title ?? $('h3', card)!.textContent;
@@ -290,9 +319,8 @@ async function cardMutation(btn: HTMLButtonElement, card: HTMLElement, kind: 'sa
       await api('POST', '/api/hidden-links', { url: link });
       invalidate('feed');
     }
-    settleList(await detached);
+    settleList(markers);
   } catch (e) {
-    const markers = await detached;
     markers.forEach((m, i) => m.replaceWith(cards[i]));
     btn.disabled = false;
     btn.textContent = prev;
@@ -545,15 +573,16 @@ document.addEventListener('click', (e) => {
       return playYouTube(btn);
     case 'refresh':
       return void refreshAll(btn);
-    case 'delete-saved':
-      btn.disabled = true;
+    case 'delete-saved': {
+      const marker = detachCard(card!); // optimistic, like save/hide
       api('DELETE', `/api/saved-links/${card!.dataset.id}`)
         .then(() => {
           invalidate('saved');
-          return detachCard(card!).then((m) => settleList([m]));
+          settleList([marker]);
         })
-        .catch(() => (btn.disabled = false));
+        .catch(() => marker.replaceWith(card!));
       return;
+    }
     case 'delete-topic':
       return void deleteTopic(btn);
     default:
@@ -586,8 +615,25 @@ window.addEventListener('popstate', (e) => {
 // ---------- boot ----------
 
 history.scrollRestoration = 'manual';
-cache.set(keyFor(new URL(location.href)), { html: app.innerHTML, at: Date.now() });
+const bootKey = keyFor(new URL(location.href));
+const renderedAt = Number(app.dataset.rendered) || Date.now();
+cache.set(bootKey, { html: app.innerHTML, at: renderedAt });
 hydrate();
+
+// Served from the service worker's page cache: show it, then swap in fresh HTML unless the
+// user has already started scrolling.
+if (Date.now() - renderedAt > 5_000) {
+  const before = app.innerHTML;
+  load(bootKey, true)
+    .then((html) => {
+      if (app.innerHTML === before && window.scrollY < 40) swap(html, null);
+    })
+    .catch(() => {});
+}
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
 
 // Warm the sibling type views once the page is idle, so switching Forums/Blogs/Saved is instant.
 const idle = (window as { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback ?? ((cb) => setTimeout(cb, 300));

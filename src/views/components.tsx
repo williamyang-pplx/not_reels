@@ -88,6 +88,11 @@ export function TopicCheckboxList({ topics, selected = [] }: { topics: TopicReco
 
 // ---------- feed card ----------
 
+/** Only http(s) links become clickable; a feed could otherwise ship `javascript:` URLs. */
+function safeHref(url: string): string | undefined {
+  return /^https?:\/\//i.test(url) ? url : undefined;
+}
+
 function truncateSummary(summary: string): string {
   const words = summary.split(/\s+/);
   return `${words.slice(0, 20).join(' ')}${words.length > 20 ? '…' : ''}`;
@@ -143,8 +148,9 @@ function YouTubeFacade({ id, title }: { id: string; title: string }) {
 function RedditEmbed({ subreddit, postId, slug, title }: { subreddit: string; postId: string; slug: string; title: string }) {
   return (
     <div class="mt-3 w-full overflow-hidden rounded-md border border-border bg-muted">
+      {/* data-src: the client sets src once the card is ~300px from the viewport (see client/app.ts). */}
       <iframe
-        src={`https://www.redditmedia.com/r/${subreddit}/comments/${postId}/${slug}/?ref_source=embed&ref=share&embed=true`}
+        data-src={`https://www.redditmedia.com/r/${subreddit}/comments/${postId}/${slug}/?ref_source=embed&ref=share&embed=true`}
         title={title || `Reddit thread in r/${subreddit}`}
         loading="lazy"
         sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
@@ -172,10 +178,11 @@ export function FeedCard({ item: raw, now }: { item: FeedItemDTO; now: Date }) {
       data-testid="feed-card"
       data-topic={topic}
       data-title={raw.title !== shownTitle ? raw.title : undefined}
+      data-href={safeHref(item.link) ? undefined : item.link}
       class={youTubeId || reddit ? 'card fc embed' : 'card fc'}
       style={`border-color:${topicColor(topic)}`}
     >
-      <a href={item.link} target="_blank" rel="noopener noreferrer" class="cl">
+      <a href={safeHref(item.link)} target="_blank" rel="noopener noreferrer" class="cl">
         <div class="meta">
           <b>{item.feedName || (isRym ? 'Rate Your Music' : 'Unknown')}</b>
           <time datetime={item.publishedAt}>{formatRelativeTime(item.publishedAt, now)}</time>
@@ -236,12 +243,17 @@ export function FeedCard({ item: raw, now }: { item: FeedItemDTO; now: Date }) {
 
 export function SavedLinkCard({ link, now }: { link: SavedLinkDTO; now: Date }) {
   return (
-    <article data-testid="saved-link-card" data-id={link.id} class="card sc">
+    <article
+      data-testid="saved-link-card"
+      data-id={link.id}
+      data-href={safeHref(link.url) ? undefined : link.url}
+      class="card sc"
+    >
       <div class="meta">
         <TopicBadge topic={link.topic} />
         <time datetime={link.savedAt}>{formatRelativeTime(link.savedAt, now)}</time>
       </div>
-      <a href={link.url} target="_blank" rel="noopener noreferrer" class="cl">
+      <a href={safeHref(link.url)} target="_blank" rel="noopener noreferrer" class="cl">
         <h3>{decodeEntities(link.title)}</h3>
       </a>
       {link.notes && <p class="notes">{link.notes}</p>}

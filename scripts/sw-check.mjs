@@ -1,0 +1,26 @@
+import { chromium, devices } from 'playwright-core';
+import { execSync } from 'node:child_process';
+const b = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' });
+const ctx = await b.newContext({ ...devices['iPhone 14 Pro'] });
+const p = await ctx.newPage();
+const errs = []; p.on('pageerror', e => errs.push(String(e)));
+await p.goto('http://localhost:3100/', { waitUntil: 'networkidle' });
+await p.evaluate(() => navigator.serviceWorker.ready);
+await p.reload({ waitUntil: 'networkidle' });
+console.log('controlled:', await p.evaluate(() => !!navigator.serviceWorker.controller));
+await p.waitForTimeout(500);
+execSync('pkill -f "node dist/server.mjs"; sleep 0.3');
+const t0 = Date.now();
+await p.goto('http://localhost:3100/', { waitUntil: 'domcontentloaded' });
+const cards = await p.$$eval('[data-testid=feed-card]', (e) => e.length);
+console.log('offline load ms', Date.now() - t0, 'cards', cards);
+// start server delayed 1.5s to emulate a cold Fly machine, wait >5s staleness first
+await p.waitForTimeout(5500);
+execSync('(sleep 1.5; DATABASE_URL=file:/tmp/nr-dev.db PORT=3100 nohup node dist/server.mjs > /tmp/nr-server.log 2>&1 &) ');
+const t1 = Date.now();
+await p.goto('http://localhost:3100/', { waitUntil: 'domcontentloaded' });
+console.log('cold-server load ms', Date.now() - t1, 'cards', await p.$$eval('[data-testid=feed-card]', (e) => e.length));
+const r0 = await p.$eval('#app', (e) => e.dataset.rendered);
+await p.waitForTimeout(3000);
+console.log('swapped after revalidate:', (await p.$eval('#app', (e) => e.innerHTML.length)) > 0, 'errs', errs);
+await b.close();
