@@ -39,7 +39,7 @@ export const parser = new Parser({
 }) as Parser<unknown, RawRssItem>;
 
 const FETCH_HEADERS = {
-  'User-Agent': 'not-reels/1.0 (RSS reader; +https://github.com/williamyang-pplx/not_reels)',
+  'User-Agent': 'not-brainrot/1.0 (RSS reader; +https://github.com/williamyang-pplx/not_reels)',
   Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
 };
 const FETCH_TIMEOUT_MS = 10_000;

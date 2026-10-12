@@ -1,5 +1,5 @@
-# fly.toml app configuration file for not-reels
-app = 'not-reels'
+# fly.toml app configuration file for not-brainrot
+app = 'not-brainrot'
 primary_region = 'ams'
 
 [build]

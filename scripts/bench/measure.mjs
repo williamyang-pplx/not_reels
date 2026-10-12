@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Framework benchmark harness for the not-reels feed page. See README.md.
+// Framework benchmark harness for the not-brainrot feed page. See README.md.
 //
 //   node measure.mjs <name> <target> [options]
 //   node measure.mjs --table            # print a markdown table of results/*.json

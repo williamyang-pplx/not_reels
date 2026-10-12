@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll } from 'vitest';
 
-const TEST_DB_PATH = path.join(os.tmpdir(), `not-reels-test-${process.pid}.db`);
+const TEST_DB_PATH = path.join(os.tmpdir(), `not-brainrot-test-${process.pid}.db`);
 process.env.DATABASE_URL = `file:${TEST_DB_PATH}`;
 process.env.NODE_ENV = 'test';
 

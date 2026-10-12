@@ -1,6 +1,6 @@
 # Feed-page benchmark harness
 
-Measures a not-reels feed-page implementation for the framework decision (spec §2.1).
+Measures a not-brainrot feed-page implementation for the framework decision (spec §2.1).
 Every run uses a fresh copy of the same seeded SQLite DB.
 
 ## Setup
@@ -88,7 +88,7 @@ The app needs these things:
   `topic-pill-*`, `hide-feed-item-btn`).
 
 ```sh
-docker build -t nr-hono /path/to/not_reels-implementation
+docker build -t nr-hono /path/to/not_brainrot
 cd scripts/bench
 node measure.mjs hono nr-hono                    # add --seed-arg --no-prisma-table if it does not use Prisma
 node measure.mjs hono-rtt150 nr-hono --rtt 150 --skip cold,warm,js,lighthouse --no-floor

@@ -17,5 +17,5 @@ if (process.argv.includes('--migrate-only')) {
 const port = Number(process.env.PORT ?? 3000);
 const hostname = process.env.HOST ?? '0.0.0.0';
 serve({ fetch: createApp().fetch, port, hostname }, (info) => {
-  console.log(`[not-reels] listening on http://${hostname}:${info.port}`);
+  console.log(`[not-brainrot] listening on http://${hostname}:${info.port}`);
 });

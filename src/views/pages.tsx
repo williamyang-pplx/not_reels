@@ -43,13 +43,13 @@ export function Document({ children }: { children: Child }) {
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
           <meta name="theme-color" content="#0a0a0a" />
-          <title>not-reels</title>
+          <title>not-brainrot</title>
           <meta name="description" content="Personal RSS feed compiler" />
           <link rel="manifest" href="/manifest.json" />
           <meta name="mobile-web-app-capable" content="yes" />
           <meta name="apple-mobile-web-app-capable" content="yes" />
           <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-          <meta name="apple-mobile-web-app-title" content="not-reels" />
+          <meta name="apple-mobile-web-app-title" content="not-brainrot" />
           <link rel="apple-touch-icon" href="/icons/galaxy.png" />
           <link rel="icon" href="/favicon.ico" sizes="any" />
           <link rel="preload" href="/fonts/rambla-400.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
@@ -77,7 +77,7 @@ export function NavBar({ path, type, topic, topics }: { path: string; type: Filt
     >
       <div class="mx-auto max-w-2xl px-3 pt-2.5 pb-2 flex items-center justify-between gap-2">
         <a href="/" data-nav class="font-bold text-2xl tracking-tight">
-          Not Reels
+          Not Brain Rot
         </a>
         <a
           href="/manage"

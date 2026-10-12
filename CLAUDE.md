@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Personal RSS aggregator (iPhone home-screen PWA). The behavior spec is the rebuild spec (`.kitchen/plan.md`).
+not-brainrot: personal RSS aggregator (iPhone home-screen PWA). The behavior spec is `documentation/spec.md` (the rebuild spec).
 The design is in `documentation/low_level_plan.md` and `documentation/framework_choice.md`.
 
 ## Commands

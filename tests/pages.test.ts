@@ -41,7 +41,7 @@ describe('GET /', () => {
       expect(body, id).toContain(`data-testid="${id}"`);
     }
     expect(body.match(/data-testid="feed-card"/g)).toHaveLength(3);
-    expect(body).toContain('Not Reels');
+    expect(body).toContain('Not Brain Rot');
     expect(body).toContain('rel="manifest" href="/manifest.json"');
     expect(body).toContain('name="apple-mobile-web-app-status-bar-style" content="black-translucent"');
   });

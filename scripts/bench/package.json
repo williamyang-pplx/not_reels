@@ -1,8 +1,8 @@
 {
-  "name": "not-reels-bench",
+  "name": "not-brainrot-bench",
   "private": true,
   "type": "module",
-  "description": "Framework benchmark harness for the not-reels feed page (see README.md)",
+  "description": "Framework benchmark harness for the not-brainrot feed page (see README.md)",
   "scripts": {
     "seed": "node seed.mjs",
     "measure": "node measure.mjs",
