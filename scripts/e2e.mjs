@@ -162,6 +162,16 @@ try {
   await page.waitForFunction(() => document.querySelector('[data-testid=type-pill-FORUM]')?.getAttribute('aria-current') === 'true');
   ok('back button');
 
+  // Back gesture with a modal open must not leave the page scroll-locked.
+  await page.click('[data-testid=type-pill-SAVED]');
+  await page.waitForURL(/saved/);
+  await page.click('[data-testid=add-saved-link-btn]');
+  await page.goBack();
+  await page.waitForFunction(() => !location.pathname.startsWith('/saved'));
+  assert.equal(await page.evaluate(() => document.documentElement.style.overflow), '');
+  assert.equal(await page.evaluate(() => document.getElementById('bar').className === 'on'), false);
+  ok('back with modal open releases scroll lock; no stuck progress bar');
+
   assert.deepEqual(errors, []);
   ok('no page errors');
 } catch (e) {

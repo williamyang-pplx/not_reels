@@ -81,10 +81,14 @@ function load(key: string, force = false): Promise<string> {
   return entry.p;
 }
 
-/** Mirror of React Query invalidation: drop cached views of these kinds. */
+/** Bumped by every invalidation, so in-flight revalidations can't resurrect pre-mutation HTML. */
+let mutations = 0;
+
+/** Mirror of React Query invalidation: drop cached views of these kinds (all kinds if none given). */
 function invalidate(...kinds: Kind[]) {
+  mutations++;
   for (const key of cache.keys()) {
-    if (kinds.includes(kindOf(key.split('?')[0]))) cache.delete(key);
+    if (kinds.length === 0 || kinds.includes(kindOf(key.split('?')[0]))) cache.delete(key);
   }
   refreshPageCache();
 }
@@ -120,6 +124,7 @@ function prefetch(href: string) {
 function swap(html: string, scroll: number | null) {
   const rows = $$('.pill-row').map((r) => r.scrollLeft);
   app.innerHTML = html;
+  document.documentElement.style.overflow = ''; // a modal open in the old view held the scroll lock
   $$('.pill-row').forEach((r, i) => (r.scrollLeft = rows[i] ?? 0));
   if (scroll !== null) window.scrollTo(0, scroll);
   hydrate();
@@ -150,12 +155,16 @@ async function navigate(href: string, opts: { push?: boolean; scroll?: number | 
   const hit = cache.get(key);
   const fresh = hit?.html !== undefined && Date.now() - hit.at < FRESH_MS;
   if (hit?.html !== undefined && !opts.force) {
+    loading(false);
     swap(hit.html, scroll);
     if (fresh) return;
-    // Stale: revalidate, and only re-render if the user hasn't started reading yet.
+    // Stale: revalidate, and only re-render if the user hasn't started reading or changed anything.
+    const seen = mutations;
     load(key, true)
       .then((html) => {
-        if (token === navToken && html !== hit.html && window.scrollY < 40 && sort !== 'random') swap(html, null);
+        if (token === navToken && seen === mutations && html !== hit.html && window.scrollY < 40 && sort !== 'random') {
+          swap(html, null);
+        }
       })
       .catch(() => {});
     return;
@@ -288,11 +297,14 @@ function detachCard(card: HTMLElement): Comment {
   return marker;
 }
 
-/** After cards are gone for good: re-render if the list is now empty, else re-cache this view. */
-function settleList(markers: Comment[]) {
+/**
+ * After cards are gone for good: re-render if the list is now empty. The view's cache entry was
+ * already dropped by invalidate(); it isn't re-snapshotted, since the DOM may hold live iframes
+ * or belong to a view the user has since navigated away from.
+ */
+function settleList(markers: Comment[], token: number) {
   markers.forEach((m) => m.remove());
-  if (!$('[data-testid="feed-card"],[data-testid="saved-link-card"]', app)) return void reload();
-  cache.set(keyFor(new URL(location.href)), { html: app.innerHTML, at: Date.now() });
+  if (token === navToken && !$('[data-testid="feed-card"],[data-testid="saved-link-card"]', app)) void reload();
 }
 
 /**
@@ -310,6 +322,7 @@ async function cardMutation(btn: HTMLButtonElement, card: HTMLElement, kind: 'sa
   // Every copy of this URL drops out of the stream.
   const cards = $$<HTMLElement>('[data-testid="feed-card"]').filter((c) => linkOf(c) === link);
   const markers = cards.map(detachCard);
+  const token = navToken;
   try {
     if (kind === 'save') {
       const title = card.dataset.title ?? $('h3', card)!.textContent;
@@ -319,7 +332,7 @@ async function cardMutation(btn: HTMLButtonElement, card: HTMLElement, kind: 'sa
       await api('POST', '/api/hidden-links', { url: link });
       invalidate('feed');
     }
-    settleList(markers);
+    settleList(markers, token);
   } catch (e) {
     markers.forEach((m, i) => m.replaceWith(cards[i]));
     btn.disabled = false;
@@ -409,7 +422,7 @@ async function deleteTopic(btn: HTMLButtonElement) {
   const err = $('[data-testid="topics-manager"] .form-error');
   try {
     await api('DELETE', `/api/topics/${encodeURIComponent(slug!)}`);
-    cache.clear();
+    invalidate();
     await reload();
   } catch (e) {
     showError(err, errMsg(e, 'Failed'));
@@ -461,7 +474,7 @@ async function submitForm(form: HTMLFormElement) {
     btn.disabled = true;
     try {
       await api('POST', '/api/topics', { slug, label });
-      cache.clear(); // topics show up in every view's nav
+      invalidate(); // topics show up in every view's nav
       await reload();
     } catch (e) {
       showError(err, errMsg(e, 'Failed'));
@@ -575,10 +588,11 @@ document.addEventListener('click', (e) => {
       return void refreshAll(btn);
     case 'delete-saved': {
       const marker = detachCard(card!); // optimistic, like save/hide
+      const token = navToken;
       api('DELETE', `/api/saved-links/${card!.dataset.id}`)
         .then(() => {
           invalidate('saved');
-          settleList([marker]);
+          settleList([marker], token);
         })
         .catch(() => marker.replaceWith(card!));
       return;

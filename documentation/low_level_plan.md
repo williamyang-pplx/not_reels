@@ -256,7 +256,8 @@ export function EmptyState(p: { message: string }): JSX  // W9
 10. **Feed/saved links render only http(s) URLs as clickable** (`safeHref`), because the CSP allows inline script and a feed could ship `javascript:` links.
 11. HTML entities that feeds leave in titles and summaries (`What&#39;s`) are decoded for display only. Stored data is unchanged.
 12. **Topic delete shows the 409 error inline.** The original UI dropped it silently.
-13. **Spec §2.1 step 3 says "stop and show the framework table before building". Per the user's instruction this run does
+13. **Default topics are also seeded at boot**, not only on topic reads. Otherwise a fresh DB rejected `POST /api/feeds` with "Unknown topic" until something had listed topics.
+14. **Spec §2.1 step 3 says "stop and show the framework table before building". Per the user's instruction this run does
    not stop; the table is written to `documentation/framework_choice.md` and summarized at the end.
 
 ## Open questions (recommended answer used)

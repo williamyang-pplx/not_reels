@@ -46,8 +46,12 @@ const compress: MiddlewareHandler = async (c, next) => {
   const type = res.headers.get('Content-Type') ?? '';
   if (!enc || !res.body || res.headers.has('Content-Encoding') || !COMPRESSIBLE.test(type)) return;
   const buf = Buffer.from(await res.arrayBuffer());
+  // Merge into the existing Vary on the old response too: Hono's c.res setter copies the old
+  // response's headers onto the new one, which would otherwise drop Accept-Encoding.
+  const vary = [res.headers.get('Vary'), 'Accept-Encoding'].filter(Boolean).join(', ');
+  res.headers.set('Vary', vary);
+  res.headers.delete('Content-Length');
   const headers = new Headers(res.headers);
-  headers.append('Vary', 'Accept-Encoding');
   if (buf.length < 1024) {
     c.res = new Response(buf, { status: res.status, headers });
     return;
@@ -81,11 +85,17 @@ interface StaticFile {
  * once (max brotli quality, since it is a one-off), then reused for every request.
  */
 function staticFiles(roots: string[]): MiddlewareHandler {
-  const cache = new Map<string, StaticFile | null>();
+  const cache = new Map<string, StaticFile>(); // hits only, so arbitrary paths can't grow it
   const load = (urlPath: string): StaticFile | null => {
-    if (cache.has(urlPath)) return cache.get(urlPath)!;
+    const hit = cache.get(urlPath);
+    if (hit) return hit;
     let file: StaticFile | null = null;
-    const rel = path.posix.normalize(decodeURIComponent(urlPath));
+    let rel: string;
+    try {
+      rel = path.posix.normalize(decodeURIComponent(urlPath));
+    } catch {
+      return null; // malformed escape: let the router 404 it
+    }
     if (!rel.includes('..') && path.extname(rel)) {
       for (const root of roots) {
         const abs = path.join(root, rel);
@@ -105,7 +115,7 @@ function staticFiles(roots: string[]): MiddlewareHandler {
         break;
       }
     }
-    cache.set(urlPath, file);
+    if (file) cache.set(urlPath, file);
     return file;
   };
   return async (c, next) => {
