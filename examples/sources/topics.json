@@ -1,0 +1,30 @@
+[
+  {
+    "slug": "NEWS",
+    "label": "News"
+  },
+  {
+    "slug": "TECH",
+    "label": "Tech"
+  },
+  {
+    "slug": "LIT",
+    "label": "Lit"
+  },
+  {
+    "slug": "MUSIC",
+    "label": "Music"
+  },
+  {
+    "slug": "REDDIT",
+    "label": "Reddit"
+  },
+  {
+    "slug": "COOL_BLOGS",
+    "label": "Cool Blogs"
+  },
+  {
+    "slug": "YOUTUBE",
+    "label": "Youtube"
+  }
+]

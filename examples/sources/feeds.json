@@ -1,0 +1,518 @@
+[
+  {
+    "name": "CJ Quines",
+    "url": "https://blog.cjquines.com/atom.xml",
+    "type": "BLOG",
+    "topics": [
+      "COOL_BLOGS"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "n_plus_one_mag",
+    "url": "https://www.nplusonemag.com/feed/",
+    "type": "BLOG",
+    "topics": [
+      "LIT"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "New Yorker (Literature)",
+    "url": "https://www.newyorker.com/feed/fiction-and-poetry/rss",
+    "type": "BLOG",
+    "topics": [
+      "LIT"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Paris Review",
+    "url": "https://www.theparisreview.org/blog/feed/",
+    "type": "BLOG",
+    "topics": [
+      "LIT"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "oliSUNvia",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCVHxJghKAB_kA_5LMM8MD3w",
+    "type": "BLOG",
+    "topics": [
+      "LIT",
+      "YOUTUBE"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Philosophize This",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCjnpuIGovFFUBLG5BeHzTag",
+    "type": "BLOG",
+    "topics": [
+      "LIT",
+      "YOUTUBE"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Alex Harri",
+    "url": "https://alexharri.com/rss.xml",
+    "type": "BLOG",
+    "topics": [
+      "TECH"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Ben Eater",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCS0N5baNlQWJCUrhCEo8WlA",
+    "type": "BLOG",
+    "topics": [
+      "TECH"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Chip Huyen",
+    "url": "https://huyenchip.com/feed.xml",
+    "type": "BLOG",
+    "topics": [
+      "TECH"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Dan Lu",
+    "url": "https://danluu.com/atom.xml",
+    "type": "BLOG",
+    "topics": [
+      "TECH"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "jdh",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCUzQJ3JBuQ9w-po4TXRJHiA",
+    "type": "BLOG",
+    "topics": [
+      "TECH"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Julia Evans",
+    "url": "https://jvns.ca/atom.xml",
+    "type": "BLOG",
+    "topics": [
+      "TECH"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Lillian Weng",
+    "url": "https://lilianweng.github.io/index.xml",
+    "type": "BLOG",
+    "topics": [
+      "TECH"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "OS Dev Popovicu",
+    "url": "https://popovicu.com/rss.xml",
+    "type": "BLOG",
+    "topics": [
+      "TECH"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "tgrcode",
+    "url": "https://tgrcode.com/rss",
+    "type": "BLOG",
+    "topics": [
+      "TECH"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Welch Labs",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UConVfxXodg78Tzh5nNu85Ew",
+    "type": "BLOG",
+    "topics": [
+      "TECH"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Yannic Kilcher",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCZHmQk67mSJgfCCTn7xBfew",
+    "type": "BLOG",
+    "topics": [
+      "TECH"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "3blue1brown",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw",
+    "type": "BLOG",
+    "topics": [
+      "YOUTUBE"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Aidan Robbins",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCcOTVI8YJJud1A6aRYrV4sg",
+    "type": "BLOG",
+    "topics": [
+      "YOUTUBE"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "GIFGAS",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC8iPVSFr42KUFf8DKsmnvSw",
+    "type": "BLOG",
+    "topics": [
+      "YOUTUBE"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Jacob Geller",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCeTfBygNb1TahcNpZyELO8g",
+    "type": "BLOG",
+    "topics": [
+      "YOUTUBE"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Peter Santenello",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC3Vuq4Q1bKFtAiKYlwRv3oA",
+    "type": "BLOG",
+    "topics": [
+      "YOUTUBE"
+    ],
+    "isActive": false,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Shiey",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCpXwMqnXfJzazKS5fJ8nrVw",
+    "type": "BLOG",
+    "topics": [
+      "YOUTUBE"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Aeon",
+    "url": "https://aeon.co/feed.rss",
+    "type": "FORUM",
+    "topics": [
+      "LIT"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Arts and Letters Daily",
+    "url": "https://www.aldaily.com/feed/",
+    "type": "FORUM",
+    "topics": [
+      "LIT"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Book Riot",
+    "url": "https://bookriot.com/feed/",
+    "type": "FORUM",
+    "topics": [
+      "LIT"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Electric Literature",
+    "url": "https://electricliterature.com/feed/",
+    "type": "FORUM",
+    "topics": [
+      "LIT"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Lithub",
+    "url": "https://lithub.com/feed/",
+    "type": "FORUM",
+    "topics": [
+      "LIT"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Pitchfork",
+    "url": "https://pitchfork.com/feed/feed-album-reviews/rss",
+    "type": "FORUM",
+    "topics": [
+      "MUSIC"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Rate Your Music",
+    "url": "local/rym_music_recs",
+    "type": "FORUM",
+    "topics": [
+      "MUSIC"
+    ],
+    "isActive": true,
+    "sourceKind": "LOCAL"
+  },
+  {
+    "name": "r/listentothis",
+    "url": "https://www.reddit.com/r/listentothis/hot.rss",
+    "type": "FORUM",
+    "topics": [
+      "MUSIC",
+      "REDDIT"
+    ],
+    "isActive": false,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "r/progrockmusic",
+    "url": "https://www.reddit.com/r/progrockmusic/hot.rss",
+    "type": "FORUM",
+    "topics": [
+      "MUSIC",
+      "REDDIT"
+    ],
+    "isActive": false,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "r/rateyourmusic",
+    "url": "https://www.reddit.com/r/rateyourmusic/hot.rss",
+    "type": "FORUM",
+    "topics": [
+      "MUSIC",
+      "REDDIT"
+    ],
+    "isActive": false,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Al Jazeera",
+    "url": "https://www.aljazeera.com/xml/rss/all.xml",
+    "type": "FORUM",
+    "topics": [
+      "NEWS"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Associated Press (AP)",
+    "url": "https://feedx.net/rss/ap.xml",
+    "type": "FORUM",
+    "topics": [
+      "NEWS"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "BBC",
+    "url": "https://feeds.bbci.co.uk/news/rss.xml?edition=us",
+    "type": "FORUM",
+    "topics": [
+      "NEWS"
+    ],
+    "isActive": false,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "LA Times (Opinion)",
+    "url": "https://www.latimes.com/politics/rss2.0.xml#nt=0000016c-0bf3-d57d-afed-2fff84fd0000-1col-7030col1",
+    "type": "FORUM",
+    "topics": [
+      "NEWS"
+    ],
+    "isActive": false,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "New York Times",
+    "url": "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
+    "type": "FORUM",
+    "topics": [
+      "NEWS"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "New Yorker",
+    "url": "https://www.newyorker.com/feed/latest/rss",
+    "type": "FORUM",
+    "topics": [
+      "NEWS"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "The Economist",
+    "url": "https://www.economist.com/finance-and-economics/rss.xml",
+    "type": "FORUM",
+    "topics": [
+      "NEWS"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "The Guardian",
+    "url": "https://www.theguardian.com/uk/rss",
+    "type": "FORUM",
+    "topics": [
+      "NEWS"
+    ],
+    "isActive": false,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Wired",
+    "url": "https://www.wired.com/feed/category/backchannel/latest/rss",
+    "type": "FORUM",
+    "topics": [
+      "NEWS"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "WSJ (Business)",
+    "url": "https://feeds.content.dowjones.io/public/rss/WSJcomUSBusiness",
+    "type": "FORUM",
+    "topics": [
+      "NEWS"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "WSJ (World News)",
+    "url": "https://feeds.content.dowjones.io/public/rss/RSSWorldNews",
+    "type": "FORUM",
+    "topics": [
+      "NEWS"
+    ],
+    "isActive": false,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "r/AlternateAngles",
+    "url": "https://www.reddit.com/r/AlternateAngles/hot.rss",
+    "type": "FORUM",
+    "topics": [
+      "REDDIT"
+    ],
+    "isActive": false,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "r/InternetMysteries",
+    "url": "https://www.reddit.com/r/InternetMysteries/hot.rss",
+    "type": "FORUM",
+    "topics": [
+      "REDDIT"
+    ],
+    "isActive": false,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "r/tripreports",
+    "url": "https://www.reddit.com/r/tripreports/hot.rss",
+    "type": "FORUM",
+    "topics": [
+      "REDDIT"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "r/urbanexploration",
+    "url": "https://reddit.com/r/urbanexploration/hot.rss",
+    "type": "FORUM",
+    "topics": [
+      "REDDIT"
+    ],
+    "isActive": false,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "r/unixporn",
+    "url": "https://www.reddit.com/r/unixporn/hot.rss",
+    "type": "FORUM",
+    "topics": [
+      "REDDIT",
+      "TECH"
+    ],
+    "isActive": false,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Hacker News",
+    "url": "https://news.ycombinator.com/rss",
+    "type": "FORUM",
+    "topics": [
+      "TECH"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  },
+  {
+    "name": "Smol AI",
+    "url": "https://news.smol.ai/rss.xml",
+    "type": "FORUM",
+    "topics": [
+      "TECH"
+    ],
+    "isActive": true,
+    "sourceKind": "RSS"
+  }
+]

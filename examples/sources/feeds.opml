@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head><title>not-brainrot feed sources</title></head>
+  <body>
+    <outline text="COOL_BLOGS" title="COOL_BLOGS">
+      <outline type="rss" text="CJ Quines" title="CJ Quines" xmlUrl="https://blog.cjquines.com/atom.xml"/>
+    </outline>
+    <outline text="LIT" title="LIT">
+      <outline type="rss" text="n_plus_one_mag" title="n_plus_one_mag" xmlUrl="https://www.nplusonemag.com/feed/"/>
+      <outline type="rss" text="New Yorker (Literature)" title="New Yorker (Literature)" xmlUrl="https://www.newyorker.com/feed/fiction-and-poetry/rss"/>
+      <outline type="rss" text="Paris Review" title="Paris Review" xmlUrl="https://www.theparisreview.org/blog/feed/"/>
+      <outline type="rss" text="oliSUNvia" title="oliSUNvia" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UCVHxJghKAB_kA_5LMM8MD3w"/>
+      <outline type="rss" text="Philosophize This" title="Philosophize This" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UCjnpuIGovFFUBLG5BeHzTag"/>
+      <outline type="rss" text="Aeon" title="Aeon" xmlUrl="https://aeon.co/feed.rss"/>
+      <outline type="rss" text="Arts and Letters Daily" title="Arts and Letters Daily" xmlUrl="https://www.aldaily.com/feed/"/>
+      <outline type="rss" text="Book Riot" title="Book Riot" xmlUrl="https://bookriot.com/feed/"/>
+      <outline type="rss" text="Electric Literature" title="Electric Literature" xmlUrl="https://electricliterature.com/feed/"/>
+      <outline type="rss" text="Lithub" title="Lithub" xmlUrl="https://lithub.com/feed/"/>
+    </outline>
+    <outline text="MUSIC" title="MUSIC">
+      <outline type="rss" text="Pitchfork" title="Pitchfork" xmlUrl="https://pitchfork.com/feed/feed-album-reviews/rss"/>
+      <outline type="rss" text="r/listentothis" title="r/listentothis" xmlUrl="https://www.reddit.com/r/listentothis/hot.rss"/>
+      <outline type="rss" text="r/progrockmusic" title="r/progrockmusic" xmlUrl="https://www.reddit.com/r/progrockmusic/hot.rss"/>
+      <outline type="rss" text="r/rateyourmusic" title="r/rateyourmusic" xmlUrl="https://www.reddit.com/r/rateyourmusic/hot.rss"/>
+    </outline>
+    <outline text="NEWS" title="NEWS">
+      <outline type="rss" text="Al Jazeera" title="Al Jazeera" xmlUrl="https://www.aljazeera.com/xml/rss/all.xml"/>
+      <outline type="rss" text="Associated Press (AP)" title="Associated Press (AP)" xmlUrl="https://feedx.net/rss/ap.xml"/>
+      <outline type="rss" text="BBC" title="BBC" xmlUrl="https://feeds.bbci.co.uk/news/rss.xml?edition=us"/>
+      <outline type="rss" text="LA Times (Opinion)" title="LA Times (Opinion)" xmlUrl="https://www.latimes.com/politics/rss2.0.xml#nt=0000016c-0bf3-d57d-afed-2fff84fd0000-1col-7030col1"/>
+      <outline type="rss" text="New York Times" title="New York Times" xmlUrl="https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"/>
+      <outline type="rss" text="New Yorker" title="New Yorker" xmlUrl="https://www.newyorker.com/feed/latest/rss"/>
+      <outline type="rss" text="The Economist" title="The Economist" xmlUrl="https://www.economist.com/finance-and-economics/rss.xml"/>
+      <outline type="rss" text="The Guardian" title="The Guardian" xmlUrl="https://www.theguardian.com/uk/rss"/>
+      <outline type="rss" text="Wired" title="Wired" xmlUrl="https://www.wired.com/feed/category/backchannel/latest/rss"/>
+      <outline type="rss" text="WSJ (Business)" title="WSJ (Business)" xmlUrl="https://feeds.content.dowjones.io/public/rss/WSJcomUSBusiness"/>
+      <outline type="rss" text="WSJ (World News)" title="WSJ (World News)" xmlUrl="https://feeds.content.dowjones.io/public/rss/RSSWorldNews"/>
+    </outline>
+    <outline text="REDDIT" title="REDDIT">
+      <outline type="rss" text="r/AlternateAngles" title="r/AlternateAngles" xmlUrl="https://www.reddit.com/r/AlternateAngles/hot.rss"/>
+      <outline type="rss" text="r/InternetMysteries" title="r/InternetMysteries" xmlUrl="https://www.reddit.com/r/InternetMysteries/hot.rss"/>
+      <outline type="rss" text="r/tripreports" title="r/tripreports" xmlUrl="https://www.reddit.com/r/tripreports/hot.rss"/>
+      <outline type="rss" text="r/urbanexploration" title="r/urbanexploration" xmlUrl="https://reddit.com/r/urbanexploration/hot.rss"/>
+      <outline type="rss" text="r/unixporn" title="r/unixporn" xmlUrl="https://www.reddit.com/r/unixporn/hot.rss"/>
+    </outline>
+    <outline text="TECH" title="TECH">
+      <outline type="rss" text="Alex Harri" title="Alex Harri" xmlUrl="https://alexharri.com/rss.xml"/>
+      <outline type="rss" text="Ben Eater" title="Ben Eater" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UCS0N5baNlQWJCUrhCEo8WlA"/>
+      <outline type="rss" text="Chip Huyen" title="Chip Huyen" xmlUrl="https://huyenchip.com/feed.xml"/>
+      <outline type="rss" text="Dan Lu" title="Dan Lu" xmlUrl="https://danluu.com/atom.xml"/>
+      <outline type="rss" text="jdh" title="jdh" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UCUzQJ3JBuQ9w-po4TXRJHiA"/>
+      <outline type="rss" text="Julia Evans" title="Julia Evans" xmlUrl="https://jvns.ca/atom.xml"/>
+      <outline type="rss" text="Lillian Weng" title="Lillian Weng" xmlUrl="https://lilianweng.github.io/index.xml"/>
+      <outline type="rss" text="OS Dev Popovicu" title="OS Dev Popovicu" xmlUrl="https://popovicu.com/rss.xml"/>
+      <outline type="rss" text="tgrcode" title="tgrcode" xmlUrl="https://tgrcode.com/rss"/>
+      <outline type="rss" text="Welch Labs" title="Welch Labs" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UConVfxXodg78Tzh5nNu85Ew"/>
+      <outline type="rss" text="Yannic Kilcher" title="Yannic Kilcher" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UCZHmQk67mSJgfCCTn7xBfew"/>
+      <outline type="rss" text="Hacker News" title="Hacker News" xmlUrl="https://news.ycombinator.com/rss"/>
+      <outline type="rss" text="Smol AI" title="Smol AI" xmlUrl="https://news.smol.ai/rss.xml"/>
+    </outline>
+    <outline text="YOUTUBE" title="YOUTUBE">
+      <outline type="rss" text="3blue1brown" title="3blue1brown" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw"/>
+      <outline type="rss" text="Aidan Robbins" title="Aidan Robbins" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UCcOTVI8YJJud1A6aRYrV4sg"/>
+      <outline type="rss" text="GIFGAS" title="GIFGAS" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UC8iPVSFr42KUFf8DKsmnvSw"/>
+      <outline type="rss" text="Jacob Geller" title="Jacob Geller" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UCeTfBygNb1TahcNpZyELO8g"/>
+      <outline type="rss" text="Peter Santenello" title="Peter Santenello" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UC3Vuq4Q1bKFtAiKYlwRv3oA"/>
+      <outline type="rss" text="Shiey" title="Shiey" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UCpXwMqnXfJzazKS5fJ8nrVw"/>
+    </outline>
+  </body>
+</opml>
