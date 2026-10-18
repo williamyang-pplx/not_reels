@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { getDb, cuid } from '../db';
 import { fail, ok, parseJson } from '../lib/api';
-import { CreateFeedSchema, FeedTypeSchema, TopicSchema, UpdateFeedSchema } from '../lib/validations';
+import { CreateFeedSchema, TopicSchema, UpdateFeedSchema } from '../lib/validations';
 import { refreshSingleFeed } from '../lib/feed-refresh';
 import { inferFeedSourceKind } from '../lib/local-feeds/registry';
 import { findUnknownTopics, unknownTopicsMessage } from '../lib/topics';
@@ -10,20 +10,18 @@ import { getFeed, listFeeds } from '../lib/queries';
 export const feedsApi = new Hono();
 
 feedsApi.get('/', (c) => {
-  const type = c.req.query('type');
   const topic = c.req.query('topic');
-  if (type && !FeedTypeSchema.safeParse(type).success) return fail(c, 'Invalid type', 'VALIDATION_ERROR', 400);
   if (topic && topic !== 'ALL' && !TopicSchema.safeParse(topic).success) {
     return fail(c, 'Invalid topic', 'VALIDATION_ERROR', 400);
   }
-  return ok(c, listFeeds({ type, topic }));
+  return ok(c, listFeeds({ topic }));
 });
 
 feedsApi.post('/', async (c) => {
   const parsed = await parseJson(c, CreateFeedSchema);
   if (!parsed.ok) return parsed.response;
   const db = getDb();
-  const { name, url, type, topics } = parsed.data;
+  const { name, url, topics } = parsed.data;
 
   if (db.prepare('SELECT 1 FROM "Feed" WHERE "url" = ?').get(url)) {
     return fail(c, 'Feed URL already exists', 'DUPLICATE', 409);
@@ -35,9 +33,9 @@ feedsApi.post('/', async (c) => {
   const now = Date.now();
   db.transaction(() => {
     db.prepare(
-      `INSERT INTO "Feed" ("id", "name", "url", "sourceKind", "type", "isActive", "fetchErrorCount", "createdAt", "updatedAt")
-       VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?)`,
-    ).run(id, name, url, inferFeedSourceKind(url), type, now, now);
+      `INSERT INTO "Feed" ("id", "name", "url", "sourceKind", "isActive", "fetchErrorCount", "createdAt", "updatedAt")
+       VALUES (?, ?, ?, ?, 1, 0, ?, ?)`,
+    ).run(id, name, url, inferFeedSourceKind(url), now, now);
     const link = db.prepare('INSERT OR IGNORE INTO "FeedTopic" ("feedId", "topicSlug") VALUES (?, ?)');
     for (const slug of topics) link.run(id, slug);
   })();

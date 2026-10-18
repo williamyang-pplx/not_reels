@@ -10,11 +10,13 @@ const db = '/tmp/nr-e2e.db';
 for (const s of ['', '-wal', '-shm']) rmSync(db + s, { force: true });
 // .backup (not a file copy) so rows still sitting in the source's WAL come along.
 execFileSync('sqlite3', [src, `.backup ${db}`]);
-// A synthetic 120-item forum feed so New mode has a second page to scroll into.
+// Migrate the copy first (a legacy DB still has Feed.type), so the INSERT below matches the current schema.
+execFileSync('node', ['dist/server.mjs', '--migrate-only'], { env: { ...process.env, DATABASE_URL: `file:${db}` }, stdio: 'inherit' });
+// A synthetic 120-item feed so New mode has a second page to scroll into.
 const now = Date.now();
 const rows = Array.from({ length: 120 }, (_, i) =>
   `('e2e-item-${i}','e2e-feed','g${i}','Synthetic item ${i}','https://example.com/e2e/${i}',${now - (i + 1) * 3600_000},${i},${now})`);
-execFileSync('sqlite3', [db, `INSERT INTO Feed (id,name,url,sourceKind,type,isActive,fetchErrorCount,createdAt,updatedAt) VALUES ('e2e-feed','Synthetic','https://example.invalid/feed.xml','RSS','FORUM',1,0,${now},${now});
+execFileSync('sqlite3', [db, `INSERT INTO Feed (id,name,url,sourceKind,isActive,fetchErrorCount,createdAt,updatedAt) VALUES ('e2e-feed','Synthetic','https://example.invalid/feed.xml','RSS',1,0,${now},${now});
 INSERT INTO FeedTopic VALUES ('e2e-feed','TECHNOLOGY');
 INSERT INTO FeedItem (id,feedId,guid,title,link,publishedAt,sourceRank,fetchedAt) VALUES ${rows.join(',')};`]);
 const server = spawn('node', ['dist/server.mjs'], { env: { ...process.env, DATABASE_URL: `file:${db}`, PORT: '3300' }, stdio: 'inherit' });
@@ -31,8 +33,8 @@ const count = (sel) => page.$$eval(sel, (e) => e.length);
 
 try {
   await page.goto(base + '/', { waitUntil: 'networkidle' });
-  assert.equal(await page.getAttribute('[data-testid=type-pill-FORUM]', 'aria-current'), 'true');
-  ok('default view is Forums / All');
+  assert.equal(await page.getAttribute('[data-testid=type-pill-FEED]', 'aria-current'), 'true');
+  ok('default view is Feed / All');
 
   // Save the first card -> leaves the feed, shows up in Saved.
   const firstTitle = await page.textContent('[data-testid=feed-card] h3');
@@ -67,7 +69,7 @@ try {
   ok('delete saved link');
 
   // Hide on the feed.
-  await page.click('[data-testid=type-pill-FORUM]');
+  await page.click('[data-testid=type-pill-FEED]');
   await page.waitForSelector('[data-testid=feed-card]');
   const hideHref = await page.getAttribute('[data-testid=feed-card] a', 'href');
   await page.click('[data-testid=feed-card] [data-testid=hide-feed-item-btn]');
@@ -98,7 +100,7 @@ try {
 
   await page.click('[data-testid=nav-manage-link]');
   await page.waitForSelector('[data-testid=topics-manager]');
-  await page.click('[data-testid=type-pill-FORUM]').catch(() => {});
+  await page.click('[data-testid=type-pill-FEED]').catch(() => {});
   assert.equal(await page.$('[data-testid=type-filter-row]'), null);
   ok('manage page hides filter rows');
 
@@ -149,17 +151,17 @@ try {
   ok('delete feed');
 
   // Refresh feeds status text.
-  await page.click('[data-testid=type-pill-FORUM]').catch(() => page.goto(base + '/'));
+  await page.click('[data-testid=type-pill-FEED]').catch(() => page.goto(base + '/'));
   await page.goto(base + '/', { waitUntil: 'networkidle' });
   await page.click('[data-testid=refresh-button]');
   await page.waitForFunction(() => /^Refreshed \d+/.test(document.querySelector('[data-testid=refresh-status]')?.textContent ?? ''), null, { timeout: 60000 });
   ok('refresh status: ' + (await page.textContent('[data-testid=refresh-status]')));
 
   // Back button restores the previous view.
-  await page.click('[data-testid=type-pill-BLOG]');
-  await page.waitForURL(/type=BLOG/);
+  await page.click('[data-testid=topic-pill-TECHNOLOGY]');
+  await page.waitForURL(/topic=TECHNOLOGY/);
   await page.goBack();
-  await page.waitForFunction(() => document.querySelector('[data-testid=type-pill-FORUM]')?.getAttribute('aria-current') === 'true');
+  await page.waitForFunction(() => document.querySelector('[data-testid=topic-pill-ALL]')?.getAttribute('aria-current') === 'true');
   ok('back button');
 
   // Back gesture with a modal open must not leave the page scroll-locked.

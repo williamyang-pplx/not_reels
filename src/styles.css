@@ -53,7 +53,6 @@ button { -webkit-user-select: none; user-select: none; }
   .notes { @apply mt-2 text-sm text-muted-foreground whitespace-pre-line; }
   .badges { @apply mt-2.5 flex items-center gap-2; }
   .tb { @apply inline-flex items-center h-5 px-2 rounded-full font-bold uppercase tracking-wide text-black; font-size: 10px; }
-  .ty { @apply inline-flex items-center h-5 px-2 rounded-full uppercase tracking-wide bg-muted text-muted-foreground border border-border; font-size: 10px; }
   .acts { @apply mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1; }
   .acts button, .acts .ytm { @apply text-xs text-primary py-2 -my-2; }
   .acts button:disabled { @apply opacity-50; }

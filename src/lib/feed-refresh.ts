@@ -15,7 +15,7 @@ import {
   parseLocalFeedUrl,
   type LocalFeedProviderRegistry,
 } from './local-feeds/registry';
-import type { FeedSourceKind, FeedType } from './types';
+import type { FeedSourceKind } from './types';
 
 export interface RefreshResult {
   refreshed: number;
@@ -34,7 +34,6 @@ interface FeedRecord {
   name: string;
   url: string;
   sourceKind: string;
-  type: string;
   isActive: number;
   fetchErrorCount: number;
 }
@@ -108,7 +107,7 @@ async function fetchNormalizedItems(feed: FeedRecord, options: RefreshOptions): 
     const provider = getLocalFeedProvider(providerId, options.localProviders);
     if (!provider) throw new Error(`Unknown local feed provider: ${providerId}`);
     const items = await provider({
-      feed: { id: feed.id, name: feed.name, url: feed.url, sourceKind, type: feed.type },
+      feed: { id: feed.id, name: feed.name, url: feed.url, sourceKind },
       now,
     });
     return normalizeLocalFeedItems(items, now);
@@ -157,11 +156,10 @@ export async function refreshSingleFeed(
   }
 }
 
-export async function refreshFeeds(feedType: FeedType, options: RefreshOptions = {}): Promise<RefreshResult> {
+/** Refresh every active feed through one p-limit pool. */
+export async function refreshAllFeeds(options: RefreshOptions = {}): Promise<RefreshResult> {
   const limit = pLimit(options.concurrency ?? FETCH_CONCURRENCY);
-  const feeds = getDb()
-    .prepare('SELECT "id" FROM "Feed" WHERE "type" = ? AND "isActive" = 1')
-    .all(feedType) as { id: string }[];
+  const feeds = getDb().prepare('SELECT "id" FROM "Feed" WHERE "isActive" = 1').all() as { id: string }[];
 
   const results = await Promise.all(feeds.map((f) => limit(() => refreshSingleFeed(f.id, options))));
 
@@ -173,13 +171,4 @@ export async function refreshFeeds(feedType: FeedType, options: RefreshOptions =
     }),
     { refreshed: 0, newItems: 0, failed: 0 },
   );
-}
-
-export async function refreshAllFeeds(options: RefreshOptions = {}): Promise<RefreshResult> {
-  const [forums, blogs] = await Promise.all([refreshFeeds('FORUM', options), refreshFeeds('BLOG', options)]);
-  return {
-    refreshed: forums.refreshed + blogs.refreshed,
-    newItems: forums.newItems + blogs.newItems,
-    failed: forums.failed + blogs.failed,
-  };
 }

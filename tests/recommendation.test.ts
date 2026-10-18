@@ -6,7 +6,6 @@ function item(input: {
   id: string;
   feedId: string;
   topic: string;
-  type?: 'FORUM' | 'BLOG';
   publishedAt: string;
   sourceRank?: number | null;
 }): RecommendationItem {
@@ -18,7 +17,6 @@ function item(input: {
     feed: {
       name: `Feed ${input.feedId}`,
       topic: input.topic,
-      type: input.type ?? 'FORUM',
     },
   };
 }

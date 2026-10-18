@@ -50,8 +50,8 @@ function useFixture(albums: Parameters<typeof createRymFixture>[0]) {
 }
 
 function rymFeed(): LocalFeedRecord {
-  const feed = createFeed({ url: 'local/rym_music_recs', sourceKind: 'LOCAL', type: 'BLOG', topic: 'MUSIC' });
-  return { id: feed.id, name: feed.name, url: feed.url, sourceKind: 'LOCAL', type: feed.type };
+  const feed = createFeed({ url: 'local/rym_music_recs', sourceKind: 'LOCAL', topic: 'MUSIC' });
+  return { id: feed.id, name: feed.name, url: feed.url, sourceKind: 'LOCAL' };
 }
 
 beforeEach(() => {

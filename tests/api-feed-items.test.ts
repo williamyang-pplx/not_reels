@@ -19,7 +19,7 @@ const GET = (qs = '') => request(`/api/feed-items${qs}`);
 
 describe('GET /api/feed-items', () => {
   it('returns items sorted by publishedAt desc in sort=new mode', async () => {
-    const feed = createFeed({ type: 'FORUM', topic: 'TECHNOLOGY' });
+    const feed = createFeed({ topic: 'TECHNOLOGY' });
     seedItems(feed.id, 5);
     const res = await GET('?sort=new');
     const body = await res.json();
@@ -31,7 +31,7 @@ describe('GET /api/feed-items', () => {
   });
 
   it('prioritizes popularity rank over recency in recommended mode', async () => {
-    const feed = createFeed({ type: 'FORUM', topic: 'TECHNOLOGY' });
+    const feed = createFeed({ topic: 'TECHNOLOGY' });
     insertItem(feed.id, {
       guid: 'popular-older',
       title: 'Popular but older',
@@ -64,28 +64,26 @@ describe('GET /api/feed-items', () => {
     expect(new Set(body.data.items.map((i: { id: string }) => i.id)).size).toBe(10);
   });
 
-  it('joins feed name/type/topic onto items', async () => {
-    const feed = createFeed({ name: 'HN', type: 'FORUM', topic: 'TECHNOLOGY' });
+  it('joins feed name/url/topics onto items', async () => {
+    const feed = createFeed({ name: 'HN', topic: 'TECHNOLOGY' });
     seedItems(feed.id, 1);
     const body = await GET().then((r) => r.json());
     const item = body.data.items[0];
     expect(item.feedName).toBe('HN');
     expect(item.feedUrl).toBe(feed.url);
-    expect(item.feedType).toBe('FORUM');
     expect(item.feedTopics).toEqual(['TECHNOLOGY']);
     expect(Object.keys(item).sort()).toEqual(
-      ['author', 'feedId', 'feedName', 'feedTopics', 'feedType', 'feedUrl', 'guid', 'id', 'link', 'publishedAt', 'summary', 'title'].sort(),
+      ['author', 'feedId', 'feedName', 'feedTopics', 'feedUrl', 'guid', 'id', 'link', 'publishedAt', 'summary', 'title'].sort(),
     );
   });
 
-  it('filters by feed type', async () => {
-    const forum = createFeed({ type: 'FORUM', url: 'https://f' });
-    const blog = createFeed({ type: 'BLOG', url: 'https://b' });
-    seedItems(forum.id, 2);
-    seedItems(blog.id, 3);
+  it('returns items from every feed and ignores a legacy type param', async () => {
+    const a = createFeed({ url: 'https://f' });
+    const b = createFeed({ url: 'https://b' });
+    seedItems(a.id, 2);
+    seedItems(b.id, 3);
     const body = await GET('?type=FORUM').then((r) => r.json());
-    expect(body.data.items).toHaveLength(2);
-    expect(body.data.items.every((i: { feedType: string }) => i.feedType === 'FORUM')).toBe(true);
+    expect(body.data.items).toHaveLength(5);
   });
 
   it('filters by topic', async () => {
@@ -141,15 +139,6 @@ describe('GET /api/feed-items', () => {
     }
   });
 
-  it('combines type+topic filters', async () => {
-    const a = createFeed({ type: 'FORUM', topic: 'NEWS', url: 'https://a' });
-    createFeed({ type: 'FORUM', topic: 'MUSIC', url: 'https://b' });
-    createFeed({ type: 'BLOG', topic: 'NEWS', url: 'https://c' });
-    seedItems(a.id, 2);
-    const body = await GET('?type=FORUM&topic=NEWS').then((r) => r.json());
-    expect(body.data.items).toHaveLength(2);
-  });
-
   it('paginates with cursor', async () => {
     const feed = createFeed();
     seedItems(feed.id, 50);
@@ -177,13 +166,6 @@ describe('GET /api/feed-items', () => {
     seedItems(feed.id, 150);
     const body = await GET('?sort=new&limit=999').then((r) => r.json());
     expect(body.data.items.length).toBe(100);
-  });
-
-  it('returns empty list for type=SAVED (separate resource)', async () => {
-    const feed = createFeed();
-    seedItems(feed.id, 5);
-    const body = await GET('?type=SAVED').then((r) => r.json());
-    expect(body.data).toEqual({ items: [], nextCursor: null });
   });
 
   it('returns 400 on invalid cursor', async () => {

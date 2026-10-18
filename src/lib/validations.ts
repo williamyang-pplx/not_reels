@@ -1,8 +1,7 @@
 import { z } from 'zod';
-import { FEED_TYPES, LOCAL_FEED_PREFIX } from './constants';
+import { LOCAL_FEED_PREFIX } from './constants';
 import { hasLocalFeedProvider, parseLocalFeedUrl } from './local-feeds/registry';
 
-export const FeedTypeSchema = z.enum(FEED_TYPES);
 export const FeedUrlSchema = z
   .string()
   .trim()
@@ -48,7 +47,6 @@ export const CreateTopicSchema = z.object({
 export const CreateFeedSchema = z.object({
   name: z.string().min(1).max(100),
   url: FeedUrlSchema,
-  type: FeedTypeSchema,
   topics: z.array(TopicSchema).min(1).max(10),
 });
 
@@ -69,14 +67,6 @@ export const UpdateSavedLinkSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   topic: TopicSchema.optional(),
   notes: z.string().max(1000).optional(),
-});
-
-export const FeedItemsQuerySchema = z.object({
-  type: z.union([FeedTypeSchema, z.literal('SAVED')]).optional(),
-  topic: z.union([TopicSchema, z.literal('ALL')]).optional(),
-  cursor: z.string().datetime().optional(),
-  limit: z.coerce.number().int().min(1).max(100).optional(),
-  sort: z.enum(['recommended', 'new', 'random']).optional(),
 });
 
 export const RefreshBodySchema = z.object({
