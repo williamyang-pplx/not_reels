@@ -94,8 +94,8 @@ function safeHref(url: string): string | undefined {
 }
 
 /**
- * Summaries can be whole articles, so a card carries only an excerpt: about a screenful, which Tiles clamps to
- * two lines in CSS. In the scroller the client swaps in the whole summary (/_f/summary/:id) for any card marked data-more.
+ * Summaries can be whole articles, so a card carries only an excerpt, about a screenful, for the first paint. The
+ * client swaps in the whole summary (/_f/summary/:id) for any card marked data-more.
  */
 const SUMMARY_WORDS = 80;
 
@@ -165,7 +165,7 @@ function RedditEmbed({ subreddit, postId, slug, title }: { subreddit: string; po
         title={title || `Reddit thread in r/${subreddit}`}
         loading="lazy"
         sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-        class="block h-[500px] w-full"
+        class="block h-[40dvh] w-full"
       ></iframe>
     </div>
   );
@@ -190,7 +190,7 @@ export function FeedCard({ item: raw, now }: { item: FeedItemDTO; now: Date }) {
       data-topic={topic}
       data-title={raw.title !== shownTitle ? raw.title : undefined}
       data-href={safeHref(item.link) ? undefined : item.link}
-      class={youTubeId || reddit ? 'card fc embed' : 'card fc'}
+      class="card fc"
       style={`border-color:${topicColor(topic)}`}
     >
       <a href={safeHref(item.link)} target="_blank" rel="noopener noreferrer" class="cl">

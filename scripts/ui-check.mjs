@@ -64,10 +64,6 @@ await shot('08-manage');
 await page.click('[data-testid=add-feed-btn]');
 await page.waitForTimeout(250);
 await shot('09-add-feed');
-await page.keyboard.press('Escape');
-await page.click('[data-testid=view-mode-tiles]');
-await page.goto(base + '/', { waitUntil: 'networkidle' });
-await shot('10-tiles');
 
 console.log(JSON.stringify({ pillMs: pill, hideMs: hide, errors }, null, 1));
 await browser.close();

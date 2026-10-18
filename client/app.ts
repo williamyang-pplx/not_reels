@@ -3,8 +3,6 @@
 
 type Sort = 'recommended' | 'new' | 'random';
 type Kind = 'feed' | 'saved' | 'manage';
-/** Mirrors html[data-mode], set by the boot script in Document (src/views/pages.tsx) or setMode. */
-type Mode = 'reels' | 'tiles';
 interface Entry {
   html?: string;
   at: number;
@@ -217,7 +215,7 @@ const frameObserver =
       )
     : null;
 
-// Scroller mode: the YouTube video whose box is at least 60% on screen plays, muted because iOS blocks
+// The YouTube video whose box is at least 60% on screen plays, muted because iOS blocks
 // unmuted autoplay without a tap; one that drops below 60% goes back to its thumbnail. (Check the ratio:
 // isIntersecting stays true at any ratio above 0.)
 const autoplayObserver =
@@ -234,7 +232,7 @@ const autoplayObserver =
       )
     : null;
 
-// Scroller mode never cuts a summary: cards carry an excerpt (data-more holds the item id), and the whole text
+// A summary is never cut: cards carry an excerpt (data-more holds the item id), and the whole text
 // is fetched once the card is within a screen of the viewport. Kept per item, so revisiting a view is instant.
 const fullSummaries = new Map<string, string>();
 const summaryObserver =
@@ -275,15 +273,12 @@ function hydrate() {
     status.textContent = refreshStatus;
     status.hidden = false;
   }
-  markMode();
   autoplayObserver?.disconnect();
   summaryObserver?.disconnect();
-  if (document.documentElement.dataset.mode !== 'tiles') {
-    // Observe the box, not the button: a hidden (playing) button has no box and would read as off-screen.
-    // After loadMore this re-observes boxes already playing; playYouTube is a no-op for those.
-    for (const b of $$('[data-act="yt"]')) autoplayObserver?.observe(b.parentElement!);
-    for (const el of $$('.sum[data-more]')) summaryObserver?.observe(el);
-  }
+  // Observe the box, not the button: a hidden (playing) button has no box and would read as off-screen.
+  // After loadMore this re-observes boxes already playing; playYouTube is a no-op for those.
+  for (const b of $$('[data-act="yt"]')) autoplayObserver?.observe(b.parentElement!);
+  for (const el of $$('.sum[data-more]')) summaryObserver?.observe(el);
   observer?.disconnect();
   const sentinel = $<HTMLElement>('.sentinel[data-cursor]');
   if (!sentinel) return;
@@ -423,26 +418,6 @@ function stopYouTube(btn: HTMLElement) {
 
 /** A video is playing: background re-renders must not swap it away (they would restart it). */
 const playing = () => !!$('[data-act="yt"][hidden]');
-
-// ---------- view mode ----------
-
-/** Manage toggle. Pages are mode-agnostic, so no cached view needs invalidating. */
-function setMode(next: Mode) {
-  try {
-    localStorage.setItem('nr-view', next); // the key matches MODE_BOOT in src/views/pages.tsx
-  } catch {
-    /* storage blocked: the choice still applies until the app is closed */
-  }
-  document.documentElement.dataset.mode = next;
-  markMode();
-}
-
-/** Show the current mode on the Manage toggle, like the sort tabs. */
-function markMode() {
-  for (const b of $$('button[data-set-mode]')) {
-    b.setAttribute('aria-selected', String(b.dataset.setMode === document.documentElement.dataset.mode));
-  }
-}
 
 async function refreshAll(btn: HTMLButtonElement) {
   const status = $('[data-testid="refresh-status"]')!;
@@ -644,9 +619,6 @@ document.addEventListener('click', (e) => {
     syncSubmit(m);
     return;
   }
-
-  const modeBtn = target.closest<HTMLButtonElement>('button[data-set-mode]');
-  if (modeBtn) return setMode(modeBtn.dataset.setMode as Mode);
 
   const sortBtn = target.closest<HTMLButtonElement>('button[data-sort]');
   if (sortBtn) {

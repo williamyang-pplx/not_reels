@@ -10,6 +10,11 @@
 html, body { height: 100%; -webkit-tap-highlight-color: transparent; }
 html { color-scheme: dark; background: hsl(0 0% 4%); -webkit-text-size-adjust: 100%; }
 body { overscroll-behavior-y: none; }
+/* The feed is a scroller: one card per screen, snapped under the sticky nav. Only the feed has snap areas, so
+   /saved and /manage scroll freely. No modal renders on the feed; one added later must also suspend snap while
+   it holds the scroll lock. */
+html { scroll-snap-type: y mandatory; scroll-padding-top: var(--nav-h); }
+[data-view='feed'] { scroll-snap-align: start; } /* keeps the toolbar reachable */
 [hidden] { display: none !important; }
 a, button, label, select { touch-action: manipulation; }
 button { -webkit-user-select: none; user-select: none; }
@@ -36,26 +41,31 @@ button { -webkit-user-select: none; user-select: none; }
 .seg button[aria-selected='false']:active { background: hsl(210 30% 20%); }
 
 /* Cards: short class names keep 100-card pages small; content-visibility skips layout and
-   paint for off-screen cards, which matters on phones. */
+   paint for off-screen cards, which matters on phones (an off-screen feed card is still a screen tall). */
 @layer components {
   .card { @apply rounded-lg bg-card p-4; content-visibility: auto; contain-intrinsic-size: auto 160px; }
-  .fc { @apply border-2; }
+  /* A feed card fills the screen below the nav and is one swipe. Content reads from the top; the summary is never
+     cut: it fills the space left and scrolls inside the card (the client swaps in the whole text), so the badges
+     and actions stay at the bottom. */
+  .fc { @apply border-2 flex flex-col; height: calc(100dvh - var(--nav-h)); padding: 20px; scroll-snap-align: start; scroll-snap-stop: always; }
   .sc { @apply border border-border; }
-  .embed { contain-intrinsic-size: auto 420px; }
   .cl { @apply block rounded-md; margin: -4px; padding: 4px; transition: background-color .1s; }
+  .fc .cl { @apply flex flex-col min-h-0; flex: 0 1 auto; } /* shrinks to fit, never stretches */
   .cl:active { background: hsl(0 0% 15% / .6); }
   .meta { @apply flex items-center justify-between gap-2 mb-1.5 text-xs text-muted-foreground; }
   .meta b { @apply font-bold truncate; }
   .meta time { @apply shrink-0; }
+  .fc .meta { @apply text-sm mb-3 shrink-0; }
   .sc .meta { @apply mb-2; }
   .card h3 { @apply font-bold leading-snug text-foreground; font-size: 17px; }
+  .fc h3 { @apply shrink-0; font-size: 24px; line-height: 1.25; }
   .sc .cl:active h3 { @apply underline; }
-  .sum { @apply mt-1 text-sm text-muted-foreground leading-snug line-clamp-2; }
+  .sum { @apply mt-4 flex-auto min-h-0 overflow-y-auto whitespace-pre-line; color: hsl(0 0% 84%); font-size: 17px; line-height: 1.55; }
   .artist { @apply mt-0.5 text-sm text-muted-foreground leading-snug; }
   .rym { @apply mt-2.5 space-y-0.5 text-sm leading-snug; }
   .rym .m { @apply text-muted-foreground; }
   .notes { @apply mt-2 text-sm text-muted-foreground whitespace-pre-line; }
-  .badges { @apply mt-2.5 flex items-center gap-2; }
+  .badges { @apply mt-auto pt-4 flex items-center gap-2; }
   .tb { @apply inline-flex items-center h-5 px-2 rounded-full font-bold uppercase tracking-wide text-black; font-size: 10px; }
   .ty { @apply inline-flex items-center h-5 px-2 rounded-full uppercase tracking-wide bg-muted text-muted-foreground border border-border; font-size: 10px; }
   .acts { @apply mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1; }
@@ -68,29 +78,6 @@ button { -webkit-user-select: none; user-select: none; }
   .ytm { @apply inline-flex items-center gap-1.5; }
   .ytm img { @apply h-4 w-4 shrink-0; }
 }
-
-/* Scroller mode: one feed card per screen, snapped under the sticky nav. Only the feed has snap areas,
-   so /saved and /manage scroll freely. No modal renders on the feed; one added later must also suspend
-   snap while it holds the scroll lock. Off-screen cards keep content-visibility: they are still a screen tall. */
-html[data-mode='reels'] { scroll-snap-type: y mandatory; scroll-padding-top: var(--nav-h); }
-html[data-mode='reels'] [data-view='feed'] { scroll-snap-align: start; } /* keeps the toolbar reachable */
-html[data-mode='reels'] .feed-items { gap: 0; }
-html[data-mode='reels'] .fc {
-  height: calc(100dvh - var(--nav-h));
-  display: flex; flex-direction: column; padding: 20px;
-  scroll-snap-align: start; scroll-snap-stop: always;
-}
-/* Content reads from the top; the summary is never cut here: it fills the space left and scrolls inside the
-   card (the client swaps in the whole text), so the badges and actions stay at the bottom of the screen. */
-html[data-mode='reels'] .fc .cl { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; } /* shrinks to fit, never stretches */
-html[data-mode='reels'] .fc .meta { @apply text-sm mb-3 shrink-0; }
-html[data-mode='reels'] .fc h3 { @apply shrink-0; font-size: 24px; line-height: 1.25; }
-html[data-mode='reels'] .fc .sum {
-  @apply mt-4; color: hsl(0 0% 84%); font-size: 17px; line-height: 1.55;
-  display: block; -webkit-line-clamp: none; flex: 1 1 auto; min-height: 0; overflow-y: auto; white-space: pre-line;
-}
-html[data-mode='reels'] .fc iframe[data-src] { height: 40dvh; } /* a Reddit thread still fits on the screen */
-html[data-mode='reels'] .fc .badges { @apply mt-auto pt-4; }
 
 .row-btn { font-size: .75rem; line-height: 1rem; padding: 0 .625rem; height: 1.875rem; border-radius: .375rem; border: 1px solid hsl(0 0% 18%); }
 .row-btn:active { background: hsl(210 30% 20%); }

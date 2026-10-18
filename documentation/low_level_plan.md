@@ -259,10 +259,9 @@ export function EmptyState(p: { message: string }): JSX  // W9
 13. **Default topics are also seeded at boot**, not only on topic reads. Otherwise a fresh DB rejected `POST /api/feeds` with "Unknown topic" until something had listed topics.
 14. **Spec §2.1 step 3 says "stop and show the framework table before building". Per the user's instruction this run does
    not stop; the table is written to `documentation/framework_choice.md` and summarized at the end.
-15. **Scroller view mode (default) with autoplay.** The mode is client-only: `<html data-mode>` is set from localStorage
-   by an inline head script, so the server HTML and every cache are mode-agnostic. The scroller layout is CSS. In the
-   scroller, the YouTube video in view autoplays muted, because iOS blocks unmuted autoplay.
-   Cards carry an 80-word excerpt (not 20). Tiles clamps it to 2 lines; the scroller swaps in the whole summary from
+15. **The feed is a scroller, with autoplay** (the spec's card list is gone). One card per screen, snapping under the
+   sticky nav; the layout is CSS only. The YouTube video in view autoplays muted, because iOS blocks unmuted autoplay.
+   Summaries are never cut: cards carry an 80-word excerpt (not 20) and the client swaps in the whole summary from
    `/_f/summary/:id` before the card comes into view, because some summaries are whole articles (up to ~330 KB).
 16. **Summary is the longest text the feed sends** (spec §5.4 said the first of `contentSnippet`/`content`/`contentEncoded`).
    Feeds like Book Riot and Lit Hub send a one-line `<description>` beside the full `<content:encoded>`, and YouTube's

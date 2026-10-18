@@ -87,16 +87,6 @@ describe('GET /', () => {
     expect(body).toContain('data-testid="feed-list"');
   });
 
-  it('defaults to the scroller and ships the boot script that applies a stored choice', async () => {
-    const { body } = await html('/');
-    expect(body).toContain('<html lang="en" data-mode="reels">');
-    expect(body).toContain("localStorage.getItem('nr-view')");
-    // The mode lives on <html>, which partial swaps never touch.
-    const partial = await html('/', { headers: { 'X-Partial': '1' } });
-    expect(partial.body).not.toContain('data-mode');
-    expect(partial.body).not.toContain('nr-view');
-  });
-
   it('renders the RYM card variant with a YouTube Music link and no archive button', async () => {
     const feed = createFeed({ name: 'RYM', url: 'local/rym_music_recs', sourceKind: 'LOCAL', type: 'BLOG', topic: 'MUSIC' });
     const { getDb, cuid } = await import('../src/db');
@@ -156,16 +146,6 @@ describe('GET /saved and /manage', () => {
     expect(body).not.toContain('data-testid="type-filter-row"');
     expect(body).toContain('paused');
     expect(body).toContain('Resume');
-  });
-
-  it('renders the feed view toggle, leaving the selected state to the client', async () => {
-    const { body } = await html('/manage');
-    for (const id of ['view-mode', 'view-mode-reels', 'view-mode-tiles']) {
-      expect(body, id).toContain(`data-testid="${id}"`);
-    }
-    expect(body).toContain('data-set-mode="reels"');
-    expect(body).toContain('data-set-mode="tiles"');
-    expect(body).not.toMatch(/data-set-mode="[a-z]+"[^>]*aria-selected/);
   });
 
   it('shows the manage empty state', async () => {
