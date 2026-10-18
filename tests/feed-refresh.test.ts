@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { refreshSingleFeed, refreshFeeds, refreshAllFeeds } from '../src/lib/feed-refresh';
+import { refreshSingleFeed, refreshAllFeeds } from '../src/lib/feed-refresh';
 import type { ParsedFeed } from '../src/lib/rss-fetcher';
 import { resetDb, createFeed, itemsOf, itemByGuid, countItems, feedRow } from './helpers';
 import { FETCH_ERROR_THRESHOLD, MAX_ITEMS_PER_FEED } from '../src/lib/constants';
@@ -15,7 +15,7 @@ beforeEach(() => {
 
 describe('refreshSingleFeed', () => {
   it('upserts new items and updates lastFetched', async () => {
-    const feed = createFeed({ type: 'BLOG' });
+    const feed = createFeed();
     const items = [
       { guid: 'a', title: 'A', link: 'https://x/a', isoDate: '2026-04-14T10:00:00Z' },
       { guid: 'b', title: 'B', link: 'https://x/b', isoDate: '2026-04-14T11:00:00Z' },
@@ -34,7 +34,7 @@ describe('refreshSingleFeed', () => {
   });
 
   it('is idempotent: re-running with same items inserts none', async () => {
-    const feed = createFeed({ type: 'BLOG' });
+    const feed = createFeed();
     const items = [{ guid: 'a', title: 'A', link: 'L', isoDate: '2026-04-14T10:00:00Z' }];
     await refreshSingleFeed(feed.id, { fetcher: fakeFetcher(items) });
     const result = await refreshSingleFeed(feed.id, { fetcher: fakeFetcher(items) });
@@ -64,8 +64,8 @@ describe('refreshSingleFeed', () => {
     expect(updated?.isActive).toBe(false);
   });
 
-  it('prunes forum feeds above MAX_ITEMS_PER_FEED', async () => {
-    const feed = createFeed({ type: 'FORUM' });
+  it('prunes feeds above MAX_ITEMS_PER_FEED', async () => {
+    const feed = createFeed();
     const total = MAX_ITEMS_PER_FEED + 5;
     const items = Array.from({ length: total }, (_, i) => ({
       guid: `g${i}`,
@@ -78,22 +78,8 @@ describe('refreshSingleFeed', () => {
     expect(count).toBe(MAX_ITEMS_PER_FEED);
   });
 
-  it('prunes blog feeds above MAX_ITEMS_PER_FEED', async () => {
-    const feed = createFeed({ type: 'BLOG' });
-    const total = MAX_ITEMS_PER_FEED + 3;
-    const items = Array.from({ length: total }, (_, i) => ({
-      guid: `g${i}`,
-      title: `T${i}`,
-      link: `L${i}`,
-      isoDate: new Date(2026, 0, 1, 0, i).toISOString(),
-    }));
-    await refreshSingleFeed(feed.id, { fetcher: fakeFetcher(items) });
-    const count = countItems(feed.id);
-    expect(count).toBe(MAX_ITEMS_PER_FEED);
-  });
-
   it('keeps the top-ranked items when pruning', async () => {
-    const feed = createFeed({ type: 'FORUM' });
+    const feed = createFeed();
     const items = Array.from({ length: MAX_ITEMS_PER_FEED + 5 }, (_, i) => ({
       guid: `g${i}`,
       title: `T${i}`,
@@ -105,7 +91,7 @@ describe('refreshSingleFeed', () => {
   });
 
   it('prunes the RYM feed to 30 items instead of 15', async () => {
-    const feed = createFeed({ type: 'BLOG', url: 'local/rym_music_recs', sourceKind: 'LOCAL', topic: 'MUSIC' });
+    const feed = createFeed({ url: 'local/rym_music_recs', sourceKind: 'LOCAL', topic: 'MUSIC' });
     const r = await refreshSingleFeed(feed.id, {
       localProviders: {
         rym_music_recs: () =>
@@ -147,7 +133,6 @@ describe('refreshSingleFeed', () => {
     const feed = createFeed({
       url: 'local/test_recs',
       sourceKind: 'LOCAL',
-      type: 'BLOG',
       topic: 'MUSIC',
     });
     let seenFeedUrl: string | null = null;
@@ -252,20 +237,20 @@ describe('refreshSingleFeed', () => {
   });
 });
 
-describe('refreshFeeds (by type)', () => {
-  it('only refreshes feeds of the given type', async () => {
-    const forum = createFeed({ type: 'FORUM', url: 'https://f.example' });
-    const blog = createFeed({ type: 'BLOG', url: 'https://b.example' });
+describe('refreshAllFeeds', () => {
+  it('refreshes every active feed in one pass', async () => {
+    const a = createFeed({ url: 'https://a.example' });
+    const b = createFeed({ url: 'https://b.example' });
     const items = [{ guid: 'g', title: 'T', link: 'L', isoDate: '2026-04-14T10:00:00Z' }];
-    const result = await refreshFeeds('FORUM', { fetcher: fakeFetcher(items) });
-    expect(result.refreshed).toBe(1);
-    expect(countItems(forum.id)).toBe(1);
-    expect(countItems(blog.id)).toBe(0);
+    const result = await refreshAllFeeds({ fetcher: fakeFetcher(items) });
+    expect(result).toEqual({ refreshed: 2, newItems: 2, failed: 0 });
+    expect(countItems(a.id)).toBe(1);
+    expect(countItems(b.id)).toBe(1);
   });
 
   it('skips inactive feeds', async () => {
-    const feed = createFeed({ type: 'BLOG', isActive: false });
-    const result = await refreshFeeds('BLOG', {
+    const feed = createFeed({ isActive: false });
+    const result = await refreshAllFeeds({
       fetcher: fakeFetcher([{ guid: 'g', title: 'T', link: 'L' }]),
     });
     expect(result.refreshed).toBe(0);
@@ -273,23 +258,22 @@ describe('refreshFeeds (by type)', () => {
   });
 
   it('counts failures separately from successes', async () => {
-    createFeed({ type: 'BLOG', url: 'https://ok.example' });
-    createFeed({ type: 'BLOG', url: 'https://bad.example' });
+    createFeed({ url: 'https://ok.example' });
+    createFeed({ url: 'https://bad.example' });
     let calls = 0;
     const mixed = async (): Promise<ParsedFeed> => {
       calls += 1;
       if (calls === 1) return { items: [{ guid: 'g', title: 'T', link: 'L' }] };
       throw new Error('bad');
     };
-    const result = await refreshFeeds('BLOG', { fetcher: mixed, concurrency: 1 });
+    const result = await refreshAllFeeds({ fetcher: mixed, concurrency: 1 });
     expect(result.refreshed).toBe(1);
     expect(result.failed).toBe(1);
   });
 
-  it('refreshes RSS and local feeds across all feed types', async () => {
-    const rss = createFeed({ type: 'FORUM', url: 'https://rss.example/feed.xml' });
+  it('refreshes RSS and local feeds', async () => {
+    const rss = createFeed({ url: 'https://rss.example/feed.xml' });
     const local = createFeed({
-      type: 'BLOG',
       url: 'local/test_recs',
       sourceKind: 'LOCAL',
     });

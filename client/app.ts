@@ -132,7 +132,7 @@ function swap(html: string, scroll: number | null) {
 
 /** Instant visual feedback while a view loads: move the pill highlight right away. */
 function markPills(url: URL) {
-  const type = url.pathname === '/saved' ? 'SAVED' : url.searchParams.get('type') || 'FORUM';
+  const type = url.pathname === '/saved' ? 'SAVED' : 'FEED';
   const topic = url.searchParams.get('topic') || 'ALL';
   for (const a of $$('[data-testid^="type-pill-"]')) a.toggleAttribute('aria-current', a.dataset.testid === `type-pill-${type}`);
   for (const a of $$('[data-testid^="topic-pill-"]')) a.toggleAttribute('aria-current', a.dataset.testid === `topic-pill-${topic}`);
@@ -562,7 +562,7 @@ async function submitForm(form: HTMLFormElement) {
   submit.textContent = PENDING[name][0];
   try {
     if (name === 'add-feed') {
-      await api('POST', '/api/feeds', { name: str('name'), url: str('url'), type: str('type'), topics });
+      await api('POST', '/api/feeds', { name: str('name'), url: str('url'), topics });
       invalidate('manage', 'feed');
     } else if (name === 'edit-feed') {
       await api('PATCH', `/api/feeds/${str('id')}`, { topics });
@@ -716,7 +716,7 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 }
 
-// Warm the sibling type views once the page is idle, so switching Forums/Blogs/Saved is instant.
+// Warm the sibling view once the page is idle, so switching Feed/Saved is instant.
 const idle = (window as { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback ?? ((cb) => setTimeout(cb, 300));
 window.addEventListener('load', () =>
   setTimeout(() => idle(() => $$<HTMLAnchorElement>('[data-testid^="type-pill-"]:not([aria-current])').forEach((a) => prefetch(a.href))), 500),

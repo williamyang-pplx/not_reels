@@ -10,19 +10,21 @@ const db = '/tmp/nr-e2e.db';
 for (const s of ['', '-wal', '-shm']) rmSync(db + s, { force: true });
 // .backup (not a file copy) so rows still sitting in the source's WAL come along.
 execFileSync('sqlite3', [src, `.backup ${db}`]);
-// A synthetic 120-item forum feed so New mode has a second page to scroll into.
+// Migrate the copy first (a legacy DB still has Feed.type), so the INSERT below matches the current schema.
+execFileSync('node', ['dist/server.mjs', '--migrate-only'], { env: { ...process.env, DATABASE_URL: `file:${db}` }, stdio: 'inherit' });
+// A synthetic 120-item feed so New mode has a second page to scroll into.
 const now = Date.now();
 const rows = Array.from({ length: 120 }, (_, i) =>
   `('e2e-item-${i}','e2e-feed','g${i}','Synthetic item ${i}','https://example.com/e2e/${i}',${now - (i + 1) * 3600_000},${i},${now})`);
 // The flows below use the NEWS and TECHNOLOGY topics; make sure the copy has them whatever the source DB holds.
 execFileSync('sqlite3', [db, `INSERT OR IGNORE INTO Topic (slug,label) VALUES ('NEWS','News'),('TECHNOLOGY','Technology');`]);
-execFileSync('sqlite3', [db, `INSERT INTO Feed (id,name,url,sourceKind,type,isActive,fetchErrorCount,createdAt,updatedAt) VALUES ('e2e-feed','Synthetic','https://example.invalid/feed.xml','RSS','FORUM',1,0,${now},${now});
+execFileSync('sqlite3', [db, `INSERT INTO Feed (id,name,url,sourceKind,isActive,fetchErrorCount,createdAt,updatedAt) VALUES ('e2e-feed','Synthetic','https://example.invalid/feed.xml','RSS',1,0,${now},${now});
 INSERT INTO FeedTopic VALUES ('e2e-feed','TECHNOLOGY');
 INSERT INTO FeedItem (id,feedId,guid,title,link,publishedAt,sourceRank,fetchedAt) VALUES ${rows.join(',')};`]);
-// A YouTube item a minute in the future, so it is first under New on Blogs/Videos whatever the DB holds.
+// A YouTube item a minute in the future, so it is first under New whatever the DB holds.
 const YT = 'dQw4w9WgXcQ';
 const LONG = Array.from({ length: 150 }, (_, i) => `word${i}`).join(' '); // longer than a card's 80-word excerpt
-execFileSync('sqlite3', [db, `INSERT INTO Feed (id,name,url,sourceKind,type,isActive,fetchErrorCount,createdAt,updatedAt) VALUES ('e2e-yt','Synthetic YT','https://example.invalid/yt.xml','RSS','BLOG',1,0,${now},${now});
+execFileSync('sqlite3', [db, `INSERT INTO Feed (id,name,url,sourceKind,isActive,fetchErrorCount,createdAt,updatedAt) VALUES ('e2e-yt','Synthetic YT','https://example.invalid/yt.xml','RSS',1,0,${now},${now});
 INSERT INTO FeedTopic VALUES ('e2e-yt','TECHNOLOGY');
 INSERT INTO FeedItem (id,feedId,guid,title,link,summary,publishedAt,sourceRank,fetchedAt) VALUES ('e2e-yt-0','e2e-yt','yt0','Synthetic video','https://www.youtube.com/watch?v=${YT}','${LONG}',${now + 60_000},0,${now});`]);
 const server = spawn('node', ['dist/server.mjs'], { env: { ...process.env, DATABASE_URL: `file:${db}`, PORT: '3300' }, stdio: 'inherit' });
@@ -39,8 +41,8 @@ const count = (sel) => page.$$eval(sel, (e) => e.length);
 
 try {
   await page.goto(base + '/', { waitUntil: 'networkidle' });
-  assert.equal(await page.getAttribute('[data-testid=type-pill-FORUM]', 'aria-current'), 'true');
-  ok('default view is Forums / All');
+  assert.equal(await page.getAttribute('[data-testid=type-pill-FEED]', 'aria-current'), 'true');
+  ok('default view is Feed / All');
 
   // The feed is a scroller: snapping, one card per screen below the nav.
   const snap = await page.evaluate(() => {
@@ -85,7 +87,7 @@ try {
   ok('delete saved link');
 
   // Hide on the feed.
-  await page.click('[data-testid=type-pill-FORUM]');
+  await page.click('[data-testid=type-pill-FEED]');
   await page.waitForSelector('[data-testid=feed-card]');
   const hideHref = await page.getAttribute('[data-testid=feed-card] a', 'href');
   await page.click('[data-testid=feed-card] [data-testid=hide-feed-item-btn]');
@@ -116,8 +118,6 @@ try {
 
   // The video in view autoplays, muted, and unloads once it scrolls away.
   const ytFrame = `iframe[src*="youtube-nocookie.com/embed/${YT}"]`;
-  await page.click('[data-testid=type-pill-BLOG]');
-  await page.waitForURL(/type=BLOG/);
   await page.click('[data-testid=sort-new]');
   await page.waitForSelector('[data-testid=feed-list][data-current-sort=new] [data-act=yt]', { state: 'attached' });
   await page.locator('[data-act=yt]').first().locator('..').scrollIntoViewIfNeeded();
@@ -135,7 +135,7 @@ try {
 
   await page.click('[data-testid=nav-manage-link]');
   await page.waitForSelector('[data-testid=topics-manager]');
-  await page.click('[data-testid=type-pill-FORUM]').catch(() => {});
+  await page.click('[data-testid=type-pill-FEED]').catch(() => {});
   assert.equal(await page.$('[data-testid=type-filter-row]'), null);
   ok('manage page hides filter rows');
 
@@ -186,17 +186,17 @@ try {
   ok('delete feed');
 
   // Refresh feeds status text.
-  await page.click('[data-testid=type-pill-FORUM]').catch(() => page.goto(base + '/'));
+  await page.click('[data-testid=type-pill-FEED]').catch(() => page.goto(base + '/'));
   await page.goto(base + '/', { waitUntil: 'networkidle' });
   await page.click('[data-testid=refresh-button]');
   await page.waitForFunction(() => /^Refreshed \d+/.test(document.querySelector('[data-testid=refresh-status]')?.textContent ?? ''), null, { timeout: 60000 });
   ok('refresh status: ' + (await page.textContent('[data-testid=refresh-status]')));
 
   // Back button restores the previous view.
-  await page.click('[data-testid=type-pill-BLOG]');
-  await page.waitForURL(/type=BLOG/);
+  await page.click('[data-testid=topic-pill-TECHNOLOGY]');
+  await page.waitForURL(/topic=TECHNOLOGY/);
   await page.goBack();
-  await page.waitForFunction(() => document.querySelector('[data-testid=type-pill-FORUM]')?.getAttribute('aria-current') === 'true');
+  await page.waitForFunction(() => document.querySelector('[data-testid=topic-pill-ALL]')?.getAttribute('aria-current') === 'true');
   ok('back button');
 
   // Back gesture with a modal open must not leave the page scroll-locked.

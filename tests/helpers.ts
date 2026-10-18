@@ -13,7 +13,6 @@ export interface TestFeed {
   name: string;
   url: string;
   sourceKind: string;
-  type: string;
   isActive: boolean;
   topics: { topicSlug: string }[];
 }
@@ -25,7 +24,6 @@ export function createFeed(
     name: string;
     url: string;
     sourceKind: string;
-    type: string;
     topic: string;
     topics: string[];
     isActive: boolean;
@@ -38,14 +36,13 @@ export function createFeed(
     name: overrides.name ?? 'Test Feed',
     url: overrides.url ?? `https://example.com/${Math.random()}.xml`,
     sourceKind: overrides.sourceKind ?? 'RSS',
-    type: overrides.type ?? 'FORUM',
     isActive: overrides.isActive ?? true,
   };
   const now = ++createdAtTick;
   db.prepare(
-    `INSERT INTO "Feed" ("id", "name", "url", "sourceKind", "type", "isActive", "fetchErrorCount", "createdAt", "updatedAt")
-     VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-  ).run(feed.id, feed.name, feed.url, feed.sourceKind, feed.type, feed.isActive ? 1 : 0, now, now);
+    `INSERT INTO "Feed" ("id", "name", "url", "sourceKind", "isActive", "fetchErrorCount", "createdAt", "updatedAt")
+     VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
+  ).run(feed.id, feed.name, feed.url, feed.sourceKind, feed.isActive ? 1 : 0, now, now);
   const link = db.prepare('INSERT INTO "FeedTopic" ("feedId", "topicSlug") VALUES (?, ?)');
   for (const slug of topics) link.run(feed.id, slug);
   return { ...feed, topics: [...topics].sort().map((topicSlug) => ({ topicSlug })) };

@@ -14,26 +14,22 @@ page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 const shot = (name, full = false) => page.screenshot({ path: `${out}/${name}.png`, fullPage: full });
 
 await page.goto(base + '/', { waitUntil: 'networkidle' });
-await shot('01-forums');
-await page.click('[data-testid=type-pill-BLOG]');
-await page.waitForURL(/type=BLOG/);
-await page.waitForTimeout(300);
-await shot('02-blogs');
+await shot('01-feed');
 await page.evaluate(() => window.scrollTo(0, 900));
 await page.waitForTimeout(400);
-await shot('03-blogs-scrolled');
+await shot('02-feed-scrolled');
 // Topic slugs differ per DB, so take the first two from the rendered pills.
 const [topicA, topicB] = await page.$$eval('[data-testid^="topic-pill-"]:not([data-testid="topic-pill-ALL"])', (els) =>
   els.map((e) => e.dataset.testid.slice('topic-pill-'.length)));
 await page.click(`[data-testid=topic-pill-${topicA}]`);
 await page.waitForURL(new RegExp(`topic=${topicA}`));
 await page.waitForTimeout(300);
-await shot('04-blogs-topic');
+await shot('03-feed-topic');
 
 // timings
 const t = async (fn) => { const s = Date.now(); await fn(); return Date.now() - s; };
 const pill = [];
-// Ends on ALL: the hide timing below needs a card, and a topic may have none on Blogs.
+// Ends on ALL: the hide timing below needs a card, and a topic may have none.
 for (const slug of [topicB, 'ALL', topicB, topicA, 'ALL']) {
   pill.push(await t(async () => {
     await page.evaluate(() => (document.querySelector('[data-testid=feed-list]').__old = true));
@@ -48,22 +44,22 @@ const hide = await t(async () => {
 });
 await page.click('[data-testid=sort-new]');
 await page.waitForTimeout(400);
-await shot('05-new');
+await shot('04-new');
 await page.click('[data-testid=type-pill-SAVED]');
 await page.waitForURL(/saved/);
 await page.waitForTimeout(300);
-await shot('06-saved');
+await shot('05-saved');
 await page.click('[data-testid=add-saved-link-btn]');
 await page.waitForTimeout(250);
-await shot('07-save-modal');
+await shot('06-save-modal');
 await page.keyboard.press('Escape');
 await page.click('[data-testid=nav-manage-link]');
 await page.waitForURL(/manage/);
 await page.waitForTimeout(300);
-await shot('08-manage');
+await shot('07-manage');
 await page.click('[data-testid=add-feed-btn]');
 await page.waitForTimeout(250);
-await shot('09-add-feed');
+await shot('08-add-feed');
 
 console.log(JSON.stringify({ pillMs: pill, hideMs: hide, errors }, null, 1));
 await browser.close();

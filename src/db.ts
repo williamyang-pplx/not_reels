@@ -35,9 +35,10 @@ export function closeDb(): void {
 }
 
 /**
- * Same tables, columns and indexes as the Prisma schema (spec §3). DateTime columns hold
- * integer milliseconds, which is how Prisma stores them in SQLite, so a database created by
- * the previous Prisma app opens unchanged.
+ * Same tables, columns and indexes as the Prisma schema (spec §3), minus `Feed.type` (dropped when
+ * the forum/blog split went away). DateTime columns hold integer milliseconds, which is how Prisma
+ * stores them in SQLite. A database created by the previous app is upgraded in place by
+ * dropLegacyFeedType().
  */
 export function migrate(conn: DB): void {
   conn.exec(`
@@ -51,7 +52,6 @@ CREATE TABLE IF NOT EXISTS "Feed" (
   "name" TEXT NOT NULL,
   "url" TEXT NOT NULL,
   "sourceKind" TEXT NOT NULL DEFAULT 'RSS',
-  "type" TEXT NOT NULL,
   "isActive" BOOLEAN NOT NULL DEFAULT true,
   "fetchErrorCount" INTEGER NOT NULL DEFAULT 0,
   "lastFetched" DATETIME,
@@ -59,7 +59,6 @@ CREATE TABLE IF NOT EXISTS "Feed" (
   "updatedAt" DATETIME NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "Feed_url_key" ON "Feed"("url");
-CREATE INDEX IF NOT EXISTS "Feed_type_idx" ON "Feed"("type");
 CREATE INDEX IF NOT EXISTS "Feed_sourceKind_idx" ON "Feed"("sourceKind");
 CREATE TABLE IF NOT EXISTS "FeedTopic" (
   "feedId" TEXT NOT NULL,
@@ -106,6 +105,15 @@ CREATE TABLE IF NOT EXISTS "HiddenLink" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "HiddenLink_url_key" ON "HiddenLink"("url");
 `);
+  dropLegacyFeedType(conn);
+}
+
+/** Drop the old FORUM/BLOG column (and its index, which SQLite requires first). No-op once gone. */
+function dropLegacyFeedType(conn: DB): void {
+  if (!conn.prepare(`SELECT 1 FROM pragma_table_info('Feed') WHERE "name" = 'type'`).get()) return;
+  conn.transaction(() => {
+    conn.exec('DROP INDEX IF EXISTS "Feed_type_idx"; ALTER TABLE "Feed" DROP COLUMN "type";');
+  })();
 }
 
 /** Run `fn` inside a transaction on the shared connection. */

@@ -1,7 +1,7 @@
 import { getDb, bool, toDate } from '../db';
 import { RELEVANT_FETCH_SIZE } from './constants';
 import { recommendItems } from './recommendation';
-import type { Feed, FeedItem, FeedType, SavedLink, SortOrder } from './types';
+import type { Feed, FeedItem, SavedLink, SortOrder } from './types';
 
 // ---------- feeds ----------
 
@@ -10,7 +10,6 @@ interface FeedRow {
   name: string;
   url: string;
   sourceKind: string;
-  type: string;
   isActive: number;
   fetchErrorCount: number;
   lastFetched: number | null;
@@ -45,7 +44,6 @@ function mapFeed(row: FeedRow, topics: string[]): FeedDTO {
     name: row.name,
     url: row.url,
     sourceKind: row.sourceKind as Feed['sourceKind'],
-    type: row.type as FeedType,
     isActive: bool(row.isActive),
     fetchErrorCount: row.fetchErrorCount,
     lastFetched: row.lastFetched === null ? null : toDate(row.lastFetched).toISOString(),
@@ -55,13 +53,9 @@ function mapFeed(row: FeedRow, topics: string[]): FeedDTO {
   };
 }
 
-export function listFeeds(filter: { type?: string; topic?: string } = {}): FeedDTO[] {
+export function listFeeds(filter: { topic?: string } = {}): FeedDTO[] {
   const where: string[] = [];
   const args: unknown[] = [];
-  if (filter.type) {
-    where.push('f."type" = ?');
-    args.push(filter.type);
-  }
   if (filter.topic && filter.topic !== 'ALL') {
     where.push('EXISTS (SELECT 1 FROM "FeedTopic" ft WHERE ft."feedId" = f."id" AND ft."topicSlug" = ?)');
     args.push(filter.topic);
@@ -85,7 +79,6 @@ export function getFeed(id: string): FeedDTO | null {
 // ---------- feed items ----------
 
 export interface FeedItemsQuery {
-  type?: FeedType | 'SAVED';
   topic?: string;
   sort: SortOrder;
   cursor?: Date;
@@ -106,11 +99,10 @@ interface ItemRow {
   sourceRank: number | null;
   feedName: string;
   feedUrl: string;
-  feedType: string;
 }
 
 const ITEM_COLUMNS = `i."id", i."feedId", i."guid", i."title", i."link", i."summary", i."author",
-  i."publishedAt", i."sourceRank", f."name" AS feedName, f."url" AS feedUrl, f."type" AS feedType`;
+  i."publishedAt", i."sourceRank", f."name" AS feedName, f."url" AS feedUrl`;
 
 function mapItem(row: ItemRow, topics: string[]): FeedItemDTO {
   return {
@@ -124,7 +116,6 @@ function mapItem(row: ItemRow, topics: string[]): FeedItemDTO {
     publishedAt: toDate(row.publishedAt).toISOString(),
     feedName: row.feedName,
     feedUrl: row.feedUrl,
-    feedType: row.feedType as FeedType,
     feedTopics: topics,
   };
 }
@@ -143,7 +134,6 @@ function shuffle<T>(items: T[]): T[] {
  * Hot ("recommended") and Random never page; New pages on publishedAt.
  */
 export function listFeedItems(q: FeedItemsQuery): { items: FeedItemDTO[]; nextCursor: string | null } {
-  if (q.type === 'SAVED') return { items: [], nextCursor: null };
   const db = getDb();
 
   const where = [
@@ -151,10 +141,6 @@ export function listFeedItems(q: FeedItemsQuery): { items: FeedItemDTO[]; nextCu
     'i."link" NOT IN (SELECT "url" FROM "SavedLink" UNION SELECT "url" FROM "HiddenLink")',
   ];
   const args: unknown[] = [];
-  if (q.type) {
-    where.push('f."type" = ?');
-    args.push(q.type);
-  }
   const topicFiltered = Boolean(q.topic && q.topic !== 'ALL');
   if (topicFiltered) {
     where.push('EXISTS (SELECT 1 FROM "FeedTopic" ft WHERE ft."feedId" = f."id" AND ft."topicSlug" = ?)');
@@ -197,7 +183,7 @@ export function listFeedItems(q: FeedItemsQuery): { items: FeedItemDTO[]; nextCu
       feedId: r.feedId,
       publishedAt: toDate(r.publishedAt),
       sourceRank: r.sourceRank,
-      feed: { name: r.feedName, type: r.feedType, topic: topicsOf(r)[0] ?? '' },
+      feed: { name: r.feedName, topic: topicsOf(r)[0] ?? '' },
       row: r,
     }));
     const ranked = recommendItems(candidates, { topicCounts, applyTopicBalance: !topicFiltered });

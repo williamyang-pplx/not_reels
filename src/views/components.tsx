@@ -1,8 +1,8 @@
 import type { Child } from 'hono/jsx';
-import { FEED_TYPE_LABELS, RYM_FEED_URL } from '../lib/constants';
+import { RYM_FEED_URL } from '../lib/constants';
 import { detectEmbedKind, extractRedditPost, extractYouTubeId } from '../lib/embed';
 import type { FeedItemDTO, SavedLinkDTO } from '../lib/queries';
-import type { FeedType, TopicRecord } from '../lib/types';
+import type { TopicRecord } from '../lib/types';
 import { decodeEntities, formatRelativeTime, reflowText, topicColor } from '../lib/utils';
 
 export function EmptyState({ message }: { message: string }) {
@@ -18,12 +18,6 @@ export function TopicBadge({ topic }: { topic: string }) {
     <span class="tb" style={`background:${topicColor(topic)}`}>
       {topic}
     </span>
-  );
-}
-
-export function TypeBadge({ type }: { type: FeedType }) {
-  return (
-    <span class="ty">{FEED_TYPE_LABELS[type] ?? type}</span>
   );
 }
 
@@ -216,7 +210,6 @@ export function FeedCard({ item: raw, now }: { item: FeedItemDTO; now: Date }) {
       {reddit && <RedditEmbed {...reddit} title={item.title} />}
       <div class="badges">
         {topic && <TopicBadge topic={topic} />}
-        {item.feedType && <TypeBadge type={item.feedType} />}
       </div>
       <div class="acts">
         {topic && (

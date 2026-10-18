@@ -5,7 +5,6 @@ import { count, createFeed, json, request, resetDb } from './helpers';
 vi.mock('../src/lib/feed-refresh', () => ({
   refreshSingleFeed: vi.fn(async () => ({ ok: true, newItems: 0 })),
   refreshAllFeeds: vi.fn(async () => ({ refreshed: 0, newItems: 0, failed: 0 })),
-  refreshFeeds: vi.fn(async () => ({ refreshed: 0, newItems: 0, failed: 0 })),
 }));
 
 beforeEach(() => {
@@ -114,7 +113,7 @@ describe('DELETE /api/topics/[slug]', () => {
 
 describe('topic validation on create', () => {
   it('rejects feed creation with a non-existent topic', async () => {
-    const res = await json('POST', '/api/feeds', { name: 'X', url: 'https://new', type: 'FORUM', topics: ['NONEXISTENT'] });
+    const res = await json('POST', '/api/feeds', { name: 'X', url: 'https://new', topics: ['NONEXISTENT'] });
     expect(res.status).toBe(400);
   });
 
@@ -125,7 +124,7 @@ describe('topic validation on create', () => {
 
   it('allows feed creation against a newly-added custom topic', async () => {
     await json('POST', '/api/topics', { slug: 'GAMING', label: 'Gaming' });
-    const res = await json('POST', '/api/feeds', { name: 'GameDev', url: 'https://gd', type: 'BLOG', topics: ['GAMING'] });
+    const res = await json('POST', '/api/feeds', { name: 'GameDev', url: 'https://gd', topics: ['GAMING'] });
     expect(res.status).toBe(201);
   });
 });

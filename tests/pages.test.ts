@@ -10,7 +10,7 @@ const html = (path: string, init?: RequestInit) => request(path, init).then(asyn
 
 describe('GET /', () => {
   it('renders the full document with nav, pills and feed list', async () => {
-    const feed = createFeed({ name: 'HN', type: 'FORUM', topic: 'TECHNOLOGY' });
+    const feed = createFeed({ name: 'HN', topic: 'TECHNOLOGY' });
     seedItems(feed.id, 3);
     const { res, body } = await html('/');
     expect(res.status).toBe(200);
@@ -21,8 +21,7 @@ describe('GET /', () => {
       'nav-bar',
       'nav-manage-link',
       'type-filter-row',
-      'type-pill-FORUM',
-      'type-pill-BLOG',
+      'type-pill-FEED',
       'type-pill-SAVED',
       'topic-filter-row',
       'topic-pill-ALL',
@@ -41,6 +40,7 @@ describe('GET /', () => {
       expect(body, id).toContain(`data-testid="${id}"`);
     }
     expect(body.match(/data-testid="feed-card"/g)).toHaveLength(3);
+    expect(body).not.toContain('class="ty"');
     expect(body).toContain('Not Brain Rot');
     expect(body).toContain('rel="manifest" href="/manifest.json"');
     expect(body).toContain('name="apple-mobile-web-app-status-bar-style" content="black-translucent"');
@@ -52,11 +52,21 @@ describe('GET /', () => {
     expect(CSP).toContain("frame-src https://www.youtube.com https://www.youtube-nocookie.com https://www.redditmedia.com https://embed.reddit.com");
   });
 
-  it('marks the active type and topic pills from the query', async () => {
-    const { body } = await html('/?type=BLOG&topic=MUSIC');
-    expect(body).toMatch(/data-testid="type-pill-BLOG"[^>]*aria-current="true"/);
+  it('marks the Feed pill and the topic pill from the query', async () => {
+    const { body } = await html('/?topic=MUSIC');
+    expect(body).toMatch(/data-testid="type-pill-FEED"[^>]*aria-current="true"/);
     expect(body).toMatch(/data-testid="topic-pill-MUSIC"[^>]*aria-current="true"/);
-    expect(body).not.toMatch(/data-testid="type-pill-FORUM"[^>]*aria-current/);
+    expect(body).not.toMatch(/data-testid="type-pill-SAVED"[^>]*aria-current/);
+  });
+
+  it('ignores a legacy ?type= param and shows every feed', async () => {
+    const a = createFeed({ url: 'https://a.example' });
+    const b = createFeed({ url: 'https://b.example' });
+    seedItems(a.id, 2);
+    seedItems(b.id, 3);
+    const { body } = await html('/?type=BLOG');
+    expect(body.match(/data-testid="feed-card"/g)).toHaveLength(5);
+    expect(body).toMatch(/data-testid="type-pill-FEED"[^>]*aria-current="true"/);
   });
 
   it('shows the empty state when no items match', async () => {
@@ -64,8 +74,8 @@ describe('GET /', () => {
     expect(body).toContain('No items match these filters yet.');
   });
 
-  it('renders "Failed to load feed." for an invalid type', async () => {
-    const { res, body } = await html('/?type=NOPE');
+  it('renders "Failed to load feed." for an invalid topic', async () => {
+    const { res, body } = await html('/?topic=nope');
     expect(res.status).toBe(200);
     expect(body).toContain('Failed to load feed.');
   });
@@ -79,7 +89,7 @@ describe('GET /', () => {
   });
 
   it('returns only nav + main (no <html>) for X-Partial requests', async () => {
-    const { res, body } = await html('/?type=BLOG', { headers: { 'X-Partial': '1' } });
+    const { res, body } = await html('/', { headers: { 'X-Partial': '1' } });
     expect(res.headers.get('Vary')).toContain('X-Partial');
     expect(body).not.toContain('<html');
     expect(body).not.toContain('<head>');
@@ -88,7 +98,7 @@ describe('GET /', () => {
   });
 
   it('renders the RYM card variant with a YouTube Music link and no archive button', async () => {
-    const feed = createFeed({ name: 'RYM', url: 'local/rym_music_recs', sourceKind: 'LOCAL', type: 'BLOG', topic: 'MUSIC' });
+    const feed = createFeed({ name: 'RYM', url: 'local/rym_music_recs', sourceKind: 'LOCAL', topic: 'MUSIC' });
     const { getDb, cuid } = await import('../src/db');
     getDb()
       .prepare(
@@ -96,7 +106,7 @@ describe('GET /', () => {
          VALUES (?, ?, 'rym-album-1', 'OK Computer', 'https://rateyourmusic.com/search?searchterm=x', 'Alt Rock | 16 June 1997 | RYM 4.30', 'Radiohead', ?, 0, ?)`,
       )
       .run(cuid(), feed.id, Date.now(), Date.now());
-    const { body } = await html('/?type=BLOG');
+    const { body } = await html('/');
     expect(body).toContain('data-testid="youtube-music-feed-item-link"');
     expect(body).toContain('https://music.youtube.com/search?q=OK+Computer');
     expect(body).not.toContain('data-testid="archive-feed-item-btn"');
@@ -191,6 +201,7 @@ describe('GET /_f/items', () => {
   it('returns the next page of cards with a sentinel cursor for sort=new', async () => {
     const feed = createFeed();
     seedItems(feed.id, 150);
+    // A legacy `type` param (from stale cached HTML) is ignored.
     const { res, body } = await html('/_f/items?type=FORUM&sort=new');
     expect(res.status).toBe(200);
     expect(body).not.toContain('<html');
@@ -198,7 +209,7 @@ describe('GET /_f/items', () => {
     const cursor = body.match(/data-testid="sentinel"[^>]*data-cursor="([^"]+)"/)?.[1];
     expect(cursor).toBeTruthy();
 
-    const next = await html(`/_f/items?type=FORUM&sort=new&cursor=${encodeURIComponent(cursor!)}`);
+    const next = await html(`/_f/items?sort=new&cursor=${encodeURIComponent(cursor!)}`);
     expect(next.body.match(/data-testid="feed-card"/g)).toHaveLength(50);
     expect(next.body).not.toMatch(/data-testid="sentinel"[^>]*data-cursor=/);
   });
@@ -214,7 +225,7 @@ describe('link safety', () => {
     const { getDb } = await import('../src/db');
     const { resetDb, createFeed } = await import('./helpers');
     await resetDb();
-    const feed = await createFeed({ type: 'FORUM' });
+    const feed = await createFeed();
     getDb()
       .prepare(
         `INSERT INTO "FeedItem" ("id","feedId","guid","title","link","publishedAt","sourceRank","fetchedAt")
@@ -222,7 +233,7 @@ describe('link safety', () => {
       )
       .run(feed.id, Date.now(), Date.now());
     const { createApp } = await import('../src/app');
-    const html = await (await createApp().request('/?type=FORUM')).text();
+    const html = await (await createApp().request('/')).text();
     expect(html).toContain('Evil');
     expect(html).not.toMatch(/\shref="javascript:/);
     expect(html).toContain('data-href="javascript:alert(1)"');

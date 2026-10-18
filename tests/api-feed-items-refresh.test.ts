@@ -4,7 +4,6 @@ import { createFeed, json, resetDb } from './helpers';
 vi.mock('../src/lib/feed-refresh', () => ({
   refreshSingleFeed: vi.fn(async () => ({ ok: true, newItems: 3 })),
   refreshAllFeeds: vi.fn(async () => ({ refreshed: 2, newItems: 5, failed: 0 })),
-  refreshFeeds: vi.fn(),
 }));
 
 beforeEach(() => {

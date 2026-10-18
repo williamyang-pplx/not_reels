@@ -12,6 +12,6 @@ await p.goto('http://localhost:3100/manage', { waitUntil: 'networkidle' });
 await p.click('[data-testid=feed-row] [data-testid=feed-edit-btn]'); await p.waitForTimeout(250);
 await p.screenshot({ path: '/tmp/shots/s-edit.png' });
 const d = await (await b.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
-await d.goto('http://localhost:3100/?type=BLOG', { waitUntil: 'networkidle' });
+await d.goto('http://localhost:3100/', { waitUntil: 'networkidle' });
 await d.screenshot({ path: '/tmp/shots/s-desktop.png' });
 await b.close();

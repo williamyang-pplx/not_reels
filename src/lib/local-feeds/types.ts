@@ -5,7 +5,6 @@ export interface LocalFeedRecord {
   name: string;
   url: string;
   sourceKind: FeedSourceKind;
-  type: string;
 }
 
 export interface LocalFeedContext {

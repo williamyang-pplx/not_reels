@@ -1,8 +1,5 @@
-import type { FeedType } from './types';
-
 export interface RecommendationFeed {
   name: string;
-  type: FeedType | string;
   topic: string;
 }
 
@@ -42,8 +39,7 @@ const DEFAULT_WEIGHTS: RecommendationWeights = {
   feedVelocity: 0.1,
 };
 
-const FORUM_HALF_LIFE_HOURS = 18;
-const BLOG_HALF_LIFE_HOURS = 72;
+const RECENCY_HALF_LIFE_HOURS = 36;
 const POPULARITY_RANK_HALF_LIFE = 4;
 const DEFAULT_TOPIC_AFFINITY = 0.5;
 const DEFAULT_BALANCE_STRENGTH = 0.25;
@@ -54,10 +50,7 @@ function ageHours(publishedAt: Date, now: Date): number {
 }
 
 function recencyScore(item: RecommendationItem, now: Date): number {
-  const halfLife = item.feed.type === 'BLOG'
-    ? BLOG_HALF_LIFE_HOURS
-    : FORUM_HALF_LIFE_HOURS;
-  const decay = Math.LN2 / halfLife;
+  const decay = Math.LN2 / RECENCY_HALF_LIFE_HOURS;
   return Math.exp(-decay * ageHours(item.publishedAt, now));
 }
 

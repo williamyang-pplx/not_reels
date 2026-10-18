@@ -1,6 +1,5 @@
 import { raw } from 'hono/html';
 import type { Child } from 'hono/jsx';
-import { FEED_TYPES, FEED_TYPE_LABELS } from '../lib/constants';
 import type { FeedDTO, FeedItemDTO, SavedLinkDTO } from '../lib/queries';
 import type { FilterType, SortOrder, TopicRecord } from '../lib/types';
 import { assets } from '../assets';
@@ -11,23 +10,20 @@ import {
   SavedLinkCard,
   TopicBadge,
   TopicCheckboxList,
-  TypeBadge,
   inputClass,
 } from './components';
 
 const TYPE_OPTIONS: { value: FilterType; label: string }[] = [
-  { value: 'FORUM', label: 'Forums' },
-  { value: 'BLOG', label: 'Blogs/Videos' },
+  { value: 'FEED', label: 'Feed' },
   { value: 'SAVED', label: 'Saved' },
 ];
 
 const SORT_LABELS: Record<SortOrder, string> = { recommended: 'Hot', new: 'New', random: 'Random' };
 
-/** URL for a (type, topic) pair, exactly as the NavBar builds it (spec §8.2). */
+/** URL for a (view, topic) pair: Saved → /saved, Feed → /; only `topic` goes in the query (spec §8.2). */
 export function viewHref(type: FilterType, topic: string): string {
   const path = type === 'SAVED' ? '/saved' : '/';
   const sp = new URLSearchParams();
-  if (type !== 'SAVED') sp.set('type', type);
   if (topic !== 'ALL') sp.set('topic', topic);
   const q = sp.toString();
   return q ? `${path}?${q}` : path;
@@ -67,8 +63,9 @@ export function Document({ children }: { children: Child }) {
   );
 }
 
-export function NavBar({ path, type, topic, topics }: { path: string; type: FilterType; topic: string; topics: TopicRecord[] }) {
+export function NavBar({ path, topic, topics }: { path: string; topic: string; topics: TopicRecord[] }) {
   const onFeedRoute = path === '/' || path === '/saved';
+  const type: FilterType = path === '/saved' ? 'SAVED' : 'FEED';
   return (
     <header
       data-testid="nav-bar"
@@ -149,18 +146,16 @@ export function FeedItemsChunk({
 }
 
 export function FeedPage({
-  type,
   topic,
   sort,
   data,
 }: {
-  type: FilterType;
   topic: string;
   sort: SortOrder;
   data: { items: FeedItemDTO[]; nextCursor: string | null } | { error: string };
 }) {
   const now = new Date();
-  const sp = new URLSearchParams({ type, sort });
+  const sp = new URLSearchParams({ sort });
   if (topic !== 'ALL') sp.set('topic', topic);
   return (
     <div class="flex flex-col gap-3 pt-3" data-testid="feed-list" data-view="feed" data-current-sort={sort}>
@@ -173,7 +168,7 @@ export function FeedPage({
         >
           Refresh feeds
         </button>
-        {type !== 'SAVED' && <div class="seg flex shrink-0 rounded-full border border-border overflow-hidden text-sm" role="tablist">
+        <div class="seg flex shrink-0 rounded-full border border-border overflow-hidden text-sm" role="tablist">
           {(['recommended', 'new', 'random'] as const).map((s) => (
             <button
               type="button"
@@ -186,7 +181,7 @@ export function FeedPage({
               {SORT_LABELS[s]}
             </button>
           ))}
-        </div>}
+        </div>
         <span class="text-xs text-muted-foreground ml-auto whitespace-nowrap" data-testid="refresh-status" hidden></span>
       </div>
       <div class="feed-items flex flex-col">
@@ -306,7 +301,6 @@ export function ManagePage({ topics, feeds }: { topics: TopicRecord[]; feeds: Fe
             class="rounded-lg border border-border bg-card p-3 flex flex-col gap-2"
           >
             <div class="flex items-center gap-2 flex-wrap">
-              <TypeBadge type={feed.type} />
               {feed.topics.map((t) => (
                 <TopicBadge topic={t} />
               ))}
@@ -349,11 +343,6 @@ export function ManagePage({ topics, feeds }: { topics: TopicRecord[]; feeds: Fe
           placeholder="https://example.com/rss.xml or local/rym_music_recs"
           class={inputClass}
         />
-        <select name="type" class={inputClass}>
-          {FEED_TYPES.map((t) => (
-            <option value={t}>{FEED_TYPE_LABELS[t]}</option>
-          ))}
-        </select>
         <TopicCheckboxList topics={topics} />
       </Modal>
       <Modal name="edit-feed" testId="edit-feed-modal" title="Edit topics">

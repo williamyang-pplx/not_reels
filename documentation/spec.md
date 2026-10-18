@@ -8,9 +8,9 @@ This spec describes every feature of the current app, front end and back end, so
 
 not-reels is a personal RSS aggregator for one user. There are no accounts and no auth. The main target is an iPhone home-screen PWA, so the UI must be compact and dark.
 
-- The user registers **feeds**. Each feed has a **type** (`FORUM` or `BLOG`) and one or more user-defined **topics**.
+- The user registers **feeds**. Each feed has one or more user-defined **topics**. There are no feed types: every feed goes into the same stream.
 - A feed is either a remote **RSS/Atom** URL or a **local provider** (`local/<provider_id>`). The only local provider is `rym_music_recs`, which samples album recommendations from a bundled SQLite DB.
-- The main page shows one stream of feed items, filtered by type and topic. It has three sort modes: Hot, New and Random.
+- The main page shows one stream of feed items from every active feed, filtered by topic. It has three sort modes: Hot, New and Random.
 - The user can **Save** an item, which moves it to the Saved list, or **Hide** it, which removes it permanently. Saved and hidden URLs never show in the main stream.
 - The user can also add saved links by hand.
 - Refresh is **manual only**. There is no cron or scheduler.
@@ -77,7 +77,6 @@ model Feed {
   name            String
   url             String      @unique   // http(s) URL or "local/<provider_id>"
   sourceKind      String      @default("RSS")   // "RSS" | "LOCAL" (inferred from url)
-  type            String                // "FORUM" | "BLOG" (plain string column)
   isActive        Boolean     @default(true)
   fetchErrorCount Int         @default(0)
   lastFetched     DateTime?
@@ -135,8 +134,6 @@ model HiddenLink {
 ### Constants (`lib/constants.ts`)
 | Name | Value |
 |---|---|
-| `FEED_TYPES` | `['FORUM','BLOG']` |
-| `FEED_TYPE_LABELS` | `{ FORUM: 'Forum', BLOG: 'Blog' }` |
 | `FEED_SOURCE_KINDS` | `['RSS','LOCAL']` |
 | `LOCAL_FEED_PREFIX` | `'local/'` |
 | `DEFAULT_TOPICS` | NEWS/News, MUSIC/Music, LITERATURE/Literature, TECHNOLOGY/Tech, SCIENCE/Science, CULTURE/Culture, POLITICS/Politics, OTHER/Other (in this order) |
@@ -144,7 +141,7 @@ model HiddenLink {
 | `RELEVANT_FETCH_SIZE` | 200 (candidate pool for Hot and Random) |
 | `MAX_ITEMS_PER_FEED` | 15 |
 | `FETCH_ERROR_THRESHOLD` | 5 |
-| `FETCH_CONCURRENCY` | 6 |
+| `FETCH_CONCURRENCY` | 12 |
 
 ### Default topic seeding
 `ensureDefaultTopics()` inserts `DEFAULT_TOPICS` only if the Topic table is empty. It runs on every `GET /api/topics`, so if the user deletes all topics, the defaults come back on the next load.
@@ -171,7 +168,7 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
 - `FeedUrlSchema`: trimmed, non-empty.
   - If it starts with `local/`: the provider id must match `/^[a-z0-9_]+$/` (else `"Local feed URL must use local/<provider_id>"`), and it must be a registered provider (else `"Unknown local feed provider"`).
   - Otherwise it must be a valid URL (else `"Invalid feed URL"`).
-- `CreateFeedSchema`: `{ name: 1–100, url: FeedUrlSchema, type: FORUM|BLOG, topics: TopicSlug[1..10] }`.
+- `CreateFeedSchema`: `{ name: 1–100, url: FeedUrlSchema, topics: TopicSlug[1..10] }`. Unknown keys (such as a legacy `type`) are stripped.
 - `UpdateFeedSchema`: `{ name?, topics?: [1..10], isActive?: boolean }`.
 - `CreateTopicSchema`: `{ slug: TopicSchema, label: 1–50 }`.
 - `CreateSavedLinkSchema`: `{ url: url, title: 1–200, topic: TopicSchema, notes?: ≤1000 }`.
@@ -188,8 +185,7 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
   - Returns `{ slug, deletedSavedLinks }`.
 
 ### 4.3 Feeds
-- **`GET /api/feeds?type=&topic=`**:
-  - Optional `type` filter (validated).
+- **`GET /api/feeds?topic=`**:
   - Optional `topic` filter (`ALL` means no filter). Matches feeds that have that topic.
   - Ordered by `createdAt desc`.
   - Each feed is returned with `topics: string[]` (flattened slugs).
@@ -208,13 +204,11 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
 - **`DELETE /api/feeds/:id`**: 404 if missing. Deletes the feed (items and FeedTopic rows cascade). Returns `{id}`.
 
 ### 4.4 Feed items
-**`GET /api/feed-items?type=&topic=&sort=&cursor=&limit=`**
+**`GET /api/feed-items?topic=&sort=&cursor=&limit=`** (a legacy `type` param is ignored)
 - `sort` is one of `recommended` (default), `new`, `random`. Any other value gives 400 `"Invalid sort"`.
 - `limit` is parsed as an int. If it is under 1 or NaN, return 400 `"Invalid limit"`. Values above 100 are capped to 100. The default is 100.
-- `type=SAVED` returns `{ items: [], nextCursor: null }` right away.
 - Base filter:
   - `feed.isActive = true`.
-  - `feed.type = type` if `type` is given (validated).
   - The feed has topic `topic` if `topic` is given and is not `ALL` (validated).
 - **Exclusion:** load all `SavedLink.url` and `HiddenLink.url`. Add `link NOT IN (...)` **to the DB query**. Do not filter these out in memory.
 - **`recommended` (shown as "Hot"):**
@@ -227,7 +221,7 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
   - If `cursor` is given (ISO datetime; invalid gives 400 `"Invalid cursor"`), add `publishedAt < cursor`.
   - Fetch `limit+1` items ordered by `publishedAt desc`.
   - If there are more than `limit` items, `nextCursor` is the last returned item's `publishedAt` as an ISO string.
-- **Item shape:** `{ id, feedId, guid, title, link, summary, author, publishedAt (ISO), feedName, feedUrl, feedType, feedTopics: string[] }`.
+- **Item shape:** `{ id, feedId, guid, title, link, summary, author, publishedAt (ISO), feedName, feedUrl, feedTopics: string[] }`.
 
 **`POST /api/feed-items/refresh`** `{feedId?}`
 - With `feedId`: 404 `"Feed not found"` if missing. Otherwise call `refreshSingleFeed`. This runs even if the feed is inactive. Returns `{ refreshed: 0|1, newItems, failed: 0|1 }`.
@@ -246,16 +240,15 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
 ## 5. Feed refresh pipeline
 
 ### 5.1 `refreshAllFeeds()`
-1. Run `refreshFeeds('FORUM')` and `refreshFeeds('BLOG')` in parallel, then sum the results.
-2. `refreshFeeds(type)` loads the **active** feeds of that type. It refreshes each one through `refreshSingleFeed`, with a `p-limit(FETCH_CONCURRENCY=6)` limiter per type.
-3. For the result: `refreshed` counts successes, `failed` counts failures, and `newItems` is the sum of `newItems`.
+1. Load every **active** feed. Refresh each one through `refreshSingleFeed`, with one `p-limit(FETCH_CONCURRENCY=12)` limiter.
+2. For the result: `refreshed` counts successes, `failed` counts failures, and `newItems` is the sum of `newItems`.
 
 Make the fetcher, the local provider registry and the concurrency injectable through an options object, so tests can stub them.
 
 ### 5.2 `refreshSingleFeed(feedId)`
 1. Load the feed. If it is missing, return `{newItems:0, ok:false}`.
 2. Get normalized items:
-   - **LOCAL:** parse the provider id from the URL and look up the provider; throw if either is invalid. Call `provider({ feed: {id,name,url,sourceKind,type}, now })`, then run `normalizeLocalFeedItems` on the result (§5.5).
+   - **LOCAL:** parse the provider id from the URL and look up the provider; throw if either is invalid. Call `provider({ feed: {id,name,url,sourceKind}, now })`, then run `normalizeLocalFeedItems` on the result (§5.5).
    - **RSS:** call `fetcher(url)` and normalize all items (§5.4). `sourceRank` is the item's index in the feed.
    - Any other `sourceKind` throws.
 3. **Upsert:**
@@ -330,11 +323,11 @@ Make the fetcher, the local provider registry and the concurrency injectable thr
 
 ## 6. Recommendation ("Hot") algorithm (`lib/recommendation.ts`)
 
-This is a pure function, `recommendItems(items, opts)`. Each item has `{id, feedId, publishedAt, sourceRank?, feed: {name, type, topic}}`.
+This is a pure function, `recommendItems(items, opts)`. Each item has `{id, feedId, publishedAt, sourceRank?, feed: {name, topic}}`.
 
 - If there are 1 or fewer items, return them as they are.
 - **Weights** (overridable): popularity 0.6, recency 0.15, topicAffinity 0.15, feedVelocity 0.1.
-- **recency:** `exp(-ln2/halfLife × ageHours)`. `halfLife` is 72h for `BLOG` and 18h otherwise. `ageHours` is floored at 0.
+- **recency:** `exp(-ln2/halfLife × ageHours)`. `halfLife` is 36h for every feed. `ageHours` is floored at 0.
 - **popularity:** if `sourceRank` is a finite number ≥ 0, use `exp(-ln2/4 × sourceRank)`. Otherwise fall back to recency.
 - **topicAffinity:** uses `topicCounts`, the number of saved links per topic.
   - If the total is 0, every topic gets 0.5.
@@ -376,7 +369,7 @@ This is a pure function, `recommendItems(items, opts)`. Each item has `{id, feed
 ### 8.1 Routes
 | Route | Page |
 |---|---|
-| `/?type=FORUM\|BLOG&topic=<slug>` | Feed stream. Defaults: `type=FORUM`, `topic=ALL` |
+| `/?topic=<slug>` | Feed stream (every active feed). Default: `topic=ALL` |
 | `/saved?topic=<slug>` | Saved links |
 | `/manage` | Topics and feeds management |
 
@@ -387,19 +380,19 @@ All pages are `force-dynamic`. The root layout wraps the page in the React Query
 **Query keys:**
 - `['topics']` (staleTime 60s, through the shared `useTopics()` hook)
 - `['feeds']`
-- `['feed-items', type, topic, sort]`
+- `['feed-items', topic, sort]`
 - `['saved-links', topic]`. Invalidate with the prefix `['saved-links']`.
 
 ### 8.2 NavBar (sticky, on every page)
 - **Header:** sticky, `z-40`, translucent background with backdrop blur, bottom border. Top padding is `env(safe-area-inset-top)`.
 - **Row 1:** the title link **"Not Reels"** (to `/`, `text-2xl` semibold) on the left. A **"Manage"** link (to `/manage`, small, muted) on the right.
 - **Rows 2 and 3** show only on `/` and `/saved`.
-  - **Type pills:** **Forums** (FORUM), **Blogs/Videos** (BLOG), **Saved** (SAVED). They are horizontally scrollable, with the scrollbar hidden. The active pill is filled with the primary color.
+  - **Type pills:** **Feed** (FEED, `/`) and **Saved** (SAVED, `/saved`). They are horizontally scrollable, with the scrollbar hidden. The active pill is filled with the primary color.
   - **Topic pills:** **All**, then every topic label in API order. The active pill uses the accent color.
 - **Current state:**
-  - The type is `SAVED` when the path is `/saved`. Otherwise it is the `type` param, defaulting to `FORUM`.
+  - The type is `SAVED` when the path is `/saved`, otherwise `FEED`. It never comes from a query param.
   - The topic is the `topic` param, defaulting to `ALL`.
-- **Clicking a pill** changes only that dimension and keeps the other one. The type picks the path: SAVED goes to `/saved`, anything else goes to `/`. Query params: set `type` unless it is SAVED; set `topic` unless it is ALL. Navigate with `router.push`.
+- **Clicking a pill** changes only that dimension and keeps the other one. The type picks the path: SAVED goes to `/saved`, anything else goes to `/`. The only query param is `topic`, set unless it is ALL. Navigate with `router.push`.
 
 ### 8.3 Feed page (`/`)
 - **Toolbar** (one row):
@@ -425,7 +418,7 @@ All pages are `force-dynamic`. The root layout wraps the page in the React Query
   - **YouTube:** a lite-youtube embed in an `aspect-video` box with `params="rel=0"` and the play label `Play: <title>`.
     It plays muted when at least 60% of it is on screen, and goes back to the thumbnail when it leaves. A tap before then plays it with sound.
   - **Reddit:** an iframe of `https://www.redditmedia.com/r/<sub>/comments/<id>/<slug>/?ref_source=embed&ref=share&embed=true`, `40dvh` tall (so the card fits on one screen), lazy-loaded. Its sandbox is `allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox`.
-- **Badges:** the TopicBadge for the first topic and a TypeBadge.
+- **Badges:** the TopicBadge for the first topic.
 - **Actions** (small text buttons):
   - **Save:** shown only if the item has at least one topic. It runs `POST /api/saved-links {url: link, title, topic: feedTopics[0]}`. The label goes "Saving…", then "Saved!", and the button stays disabled after success. On success it invalidates **both** `['feed-items']` and `['saved-links']`.
   - **Hide:** runs `POST /api/hidden-links {url: link}`. The label goes "Hiding…", then "Hidden", and the button stays disabled. On success it invalidates `['feed-items']`.
@@ -445,7 +438,6 @@ An item uses this variant when `feedUrl === 'local/rym_music_recs'` or its guid 
 
 ### 8.6 Badges
 - **TopicBadge:** a pill (`h-5`, 10px, uppercase, tracking-wide, black text) with the background from the topic color. It shows the slug, not the label.
-- **TypeBadge:** a muted pill with a border, showing `Forum` or `Blog`.
 
 ### 8.7 Saved page (`/saved`)
 - A **"+ Save link"** primary button opens the **Save a link** modal. The fields are:
@@ -473,12 +465,11 @@ An item uses this variant when `feedUrl === 'local/rym_music_recs'` or its guid 
 2. **"+ Add feed"** button. It opens the **Add a feed** modal, which has:
    - Name (required)
    - URL (text, required, placeholder `https://example.com/rss.xml or local/rym_music_recs`)
-   - A type `<select>` (Forum or Blog, default Forum)
    - A **TopicCheckboxList**
    - Buttons: Cancel and "Add feed" ("Adding…" while pending). Submit is disabled until at least one topic is checked, and it validates again on submit ("Pick at least one topic").
    - On success, the form resets, the modal closes and `['feeds']` is invalidated.
 3. **The feed list.** The states are `Loading…` and `No feeds yet. Add your first one above.`. Each feed row (a card) shows:
-   - The TypeBadge, a TopicBadge for **every** topic, and a red uppercase `paused` tag when the feed is inactive.
+   - A TopicBadge for **every** topic, and a red uppercase `paused` tag when the feed is inactive.
    - The name, and the URL (muted, `break-all`).
    - Buttons:
      - **Refresh:** `POST /api/feed-items/refresh {feedId}`. It is disabled when the feed is paused, and it invalidates nothing.
@@ -494,7 +485,7 @@ An item uses this variant when `feedUrl === 'local/rym_music_recs'` or its guid 
 **TopicCheckboxList:** a bordered box that scrolls past `max-h-40`. It has one checkbox row per topic, showing the label. With no topics, it shows "No topics — add one in Manage".
 
 ### 8.9 Test IDs (keep them for test parity)
-- Layout and nav: `nav-bar`, `nav-manage-link`, `type-filter-row`, `type-pill-{FORUM|BLOG|SAVED}`, `topic-filter-row`, `topic-pill-{slug|ALL}`.
+- Layout and nav: `nav-bar`, `nav-manage-link`, `type-filter-row`, `type-pill-{FEED|SAVED}`, `topic-filter-row`, `topic-pill-{slug|ALL}`.
 - Feed page: `feed-list`, `refresh-button`, `refresh-status`, `sort-{recommended|new|random}`, `sentinel`, `empty-state`.
 - Feed cards: `feed-card`, `save-feed-item-btn`, `hide-feed-item-btn`, `archive-feed-item-btn`, `youtube-music-feed-item-link`.
 - Saved page: `saved-link-card`, `saved-link-delete`, `add-saved-link-btn`, `add-saved-link-modal`.

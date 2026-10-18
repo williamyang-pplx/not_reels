@@ -96,7 +96,11 @@ export function closeDb(): void  // D3 (tests)
 export function migrate(db: DB): void  // D4
   // CREATE TABLE IF NOT EXISTS for Topic, Feed, FeedTopic, FeedItem, SavedLink, HiddenLink
   // with the exact Prisma column names/types/indexes from spec §3 (DATETIME stored as
-  // INTEGER ms like Prisma). Idempotent: an existing Prisma-created DB is left as is.
+  // INTEGER ms like Prisma), minus Feed.type. Idempotent. Then dropLegacyFeedType(db) (D7).
+
+function dropLegacyFeedType(db: DB): void  // D7
+  // if pragma_table_info('Feed') has "type": in one transaction DROP INDEX "Feed_type_idx",
+  // then ALTER TABLE "Feed" DROP COLUMN "type". No-op once the column is gone.
 
 export function tx<T>(fn: () => T): T  // D5 — getDb().transaction(fn)()
 
@@ -123,9 +127,9 @@ export function topicExists(slug: string): boolean // T2
 export function findUnknownTopics(slugs: string[]): string[]  // T3
 
 // src/lib/queries.ts — read paths used by both JSON API and HTML pages
-export interface FeedItemsQuery { type?: FeedType | 'SAVED'; topic?: string; sort: SortOrder; cursor?: Date; limit: number }
+export interface FeedItemsQuery { topic?: string; sort: SortOrder; cursor?: Date; limit: number }
 export function listFeedItems(q: FeedItemsQuery): { items: FeedItemDTO[]; nextCursor: string | null }  // Q1
-  // SAVED → empty. WHERE f.isActive=1 [AND f.type=?] [AND EXISTS FeedTopic topic=?]
+  // WHERE f.isActive=1 [AND EXISTS FeedTopic topic=?]   (every active feed; no feed type)
   // AND i.link NOT IN (SELECT url FROM SavedLink UNION SELECT url FROM HiddenLink)   ← in SQL
   // recommended: ORDER BY sourceRank ASC NULLS?, publishedAt DESC LIMIT 200 → attach topics
   //   (one query: SELECT feedId, topicSlug FROM FeedTopic WHERE feedId IN (...) ORDER BY feedId, topicSlug)
@@ -133,7 +137,7 @@ export function listFeedItems(q: FeedItemsQuery): { items: FeedItemDTO[]; nextCu
   // random: publishedAt DESC LIMIT 200 → Fisher–Yates → slice
   // new: [publishedAt < cursor] ORDER BY publishedAt DESC LIMIT limit+1 → nextCursor
 export function listTopics(): TopicRecord[]        // Q2 — ensureDefaultTopics() then ORDER BY createdAt, rowid
-export function listFeeds(f: { type?: string; topic?: string }): FeedDTO[]  // Q3 — createdAt DESC, topics flattened
+export function listFeeds(f: { topic?: string }): FeedDTO[]  // Q3 — createdAt DESC, topics flattened
 export function getFeed(id: string): FeedDTO | null // Q4
 export function listSavedLinks(topic?: string): SavedLinkDTO[]  // Q5 — savedAt DESC
 ```
@@ -147,8 +151,8 @@ export async function refreshSingleFeed(feedId: string, options?: RefreshOptions
   // upsert (INSERT ... ON CONFLICT(feedId,guid) DO UPDATE), count new, mark stale (rank 10000),
   // set lastFetched/fetchErrorCount=0, prune to 30 (RYM) / 15 (sourceRank asc, publishedAt desc)
   // catch: fetchErrorCount+1, deactivate at ≥5, log "[feed-refresh] failed feed=<id> url=<url>:"
-export async function refreshFeeds(type: FeedType, options?: RefreshOptions): Promise<RefreshResult>  // R2 — p-limit(6) per type
-export async function refreshAllFeeds(options?: RefreshOptions): Promise<RefreshResult>  // R3
+// R2 — refreshFeeds(type) removed with the forum/blog split
+export async function refreshAllFeeds(options?: RefreshOptions): Promise<RefreshResult>  // R3 — every active feed, one p-limit(12) pool
 
 // src/lib/local-feeds/rym-music-recs.ts
 export async function rymMusicRecsProvider(ctx: LocalFeedContext): Promise<LocalFeedItemInput[]>  // L1
@@ -161,7 +165,7 @@ reference route handlers with Prisma calls swapped for SQL; status codes/message
 ```ts
 export const topicsApi = new Hono()        // GET / POST /api/topics, DELETE /api/topics/:slug   (H1)
 export const feedsApi = new Hono()         // GET / POST /api/feeds, PATCH / DELETE /api/feeds/:id (H2)
-export const feedItemsApi = new Hono()     // GET /api/feed-items (validates sort/limit/type/topic/cursor, calls Q1),
+export const feedItemsApi = new Hono()     // GET /api/feed-items (validates sort/limit/topic/cursor, calls Q1),
                                            // POST /api/feed-items/refresh (H3)
 export const savedLinksApi = new Hono()    // GET / POST, PATCH / DELETE /:id (H4)
 export const hiddenLinksApi = new Hono()   // POST (upsert), DELETE ?url= (H5)
@@ -180,11 +184,11 @@ export function createApp(): Hono  // P1
 ## src/pages.tsx  [new]
 ```tsx
 export const pagesRouter = new Hono()  // V1
-// GET /        ?type=FORUM|BLOG&topic=&sort=   → Layout(NavBar + FeedPage) ; sort param is internal (client never puts it in the address bar)
+// GET /        ?topic=&sort=                   → Layout(NavBar + FeedPage) ; sort param is internal (client never puts it in the address bar)
 // GET /saved   ?topic=                         → Layout(NavBar + SavedPage)
 // GET /manage                                  → Layout(NavBar + ManagePage)
 // Header "X-Partial: 1" → return only the #app inner HTML (nav + main) with no <html>/<head>; Vary: X-Partial
-// GET /_f/items?type&topic&sort=new&cursor     → next page of FeedCards + new sentinel (infinite scroll)
+// GET /_f/items?topic&sort=new&cursor     → next page of FeedCards + new sentinel (infinite scroll)
 // All HTML: Cache-Control: no-store
 ```
 
@@ -193,11 +197,11 @@ export const pagesRouter = new Hono()  // V1
 export function Layout(p: { title?: string; children: Child }): JSX  // W1 — head: meta viewport (cover), theme-color,
   // apple-mobile-web-app-* tags, manifest, apple-touch-icon, <link rel=preload font 400>, inline <style> (tailwind + @font-face),
   // <script src=/app.<hash>.js defer>; body: <div id="app">…</div><main class="mx-auto max-w-2xl px-3 pb-10">
-export function NavBar(p: { path: string; type: FilterType; topic: string; topics: TopicRecord[] }): JSX  // W2 — test ids per spec §8.9; pills are <a href> (work without JS) with data-nav
-export function TopicBadge(p: { topic: string }): JSX; export function TypeBadge(p: { type: FeedType }): JSX  // W3
+export function NavBar(p: { path: string; topic: string; topics: TopicRecord[] }): JSX  // W2 — test ids per spec §8.9; pills (Feed | Saved, derived from path) are <a href> (work without JS) with data-nav
+export function TopicBadge(p: { topic: string }): JSX  // W3
 export function FeedCard(p: { item: FeedItemDTO; now: Date }): JSX  // W4 — standard + RYM variant (spec §8.4/8.5);
   // YouTube: <lite-yt data-id> facade (thumbnail img + play button, iframe on tap); Reddit: lazy iframe (500px)
-export function FeedPage(p: { type; topic; sort; data: {items; nextCursor} }): JSX  // W5 — toolbar, list, sentinel data-cursor
+export function FeedPage(p: { topic; sort; data: {items; nextCursor} }): JSX  // W5 — toolbar, list, sentinel data-cursor
 export function SavedPage(p: { links: SavedLinkDTO[]; topics: TopicRecord[] }): JSX  // W6 — + Save link modal
 export function ManagePage(p: { topics: TopicRecord[]; feeds: FeedDTO[] }): JSX  // W7 — topics manager, add-feed modal, edit modal, feed rows
 export function Modal(p: { id: string; testId: string; title: string; children }): JSX  // W8 — overlay pattern (spec §8.8)
@@ -259,11 +263,15 @@ export function EmptyState(p: { message: string }): JSX  // W9
 13. **Default topics are also seeded at boot**, not only on topic reads. Otherwise a fresh DB rejected `POST /api/feeds` with "Unknown topic" until something had listed topics.
 14. **Spec §2.1 step 3 says "stop and show the framework table before building". Per the user's instruction this run does
    not stop; the table is written to `documentation/framework_choice.md` and summarized at the end.
-15. **The feed is a scroller, with autoplay** (the spec's card list is gone). One card per screen, snapping under the
+15. **One feed: the FORUM/BLOG split is removed.** `Feed.type` is dropped at boot (D7). Hot uses one 36 h recency half-life,
+   refresh runs every active feed through one pool of 12, and the nav pills are Feed | Saved. Legacy `type` query params and
+   POST body fields are ignored, so stale service-worker caches keep working. Rolling back to an older build needs the volume
+   snapshot (or `ALTER TABLE "Feed" ADD COLUMN "type" TEXT NOT NULL DEFAULT 'FORUM'`), because the old `migrate()` indexes `type`.
+16. **The feed is a scroller, with autoplay** (the spec's card list is gone). One card per screen, snapping under the
    sticky nav; the layout is CSS only. The YouTube video in view autoplays muted, because iOS blocks unmuted autoplay.
    Summaries are never cut: cards carry an 80-word excerpt (not 20) and the client swaps in the whole summary from
    `/_f/summary/:id` before the card comes into view, because some summaries are whole articles (up to ~330 KB).
-16. **Summary is the longest text the feed sends** (spec §5.4 said the first of `contentSnippet`/`content`/`contentEncoded`).
+17. **Summary is the longest text the feed sends** (spec §5.4 said the first of `contentSnippet`/`content`/`contentEncoded`).
    Feeds like Book Riot and Lit Hub send a one-line `<description>` beside the full `<content:encoded>`, and YouTube's
    only text is `media:description`, so the first-defined rule kept the teaser or nothing.
 

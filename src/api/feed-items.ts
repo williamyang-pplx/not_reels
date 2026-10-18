@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
 import { fail, ok, parseJson } from '../lib/api';
-import { FeedTypeSchema, RefreshBodySchema, TopicSchema } from '../lib/validations';
+import { RefreshBodySchema, TopicSchema } from '../lib/validations';
 import { PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX } from '../lib/constants';
 import { listFeedItems, type FeedItemsQuery } from '../lib/queries';
 import { refreshAllFeeds, refreshSingleFeed } from '../lib/feed-refresh';
@@ -26,14 +26,7 @@ export function parseFeedItemsQuery(params: Record<string, string | undefined>):
     limit = Math.min(n, PAGE_SIZE_MAX);
   }
 
-  if (params.type === 'SAVED') return { type: 'SAVED', sort, limit };
-
   const q: FeedItemsQuery = { sort, limit };
-  if (params.type) {
-    const t = FeedTypeSchema.safeParse(params.type);
-    if (!t.success) return { error: 'Invalid type' };
-    q.type = t.data;
-  }
   if (params.topic && params.topic !== 'ALL') {
     const t = TopicSchema.safeParse(params.topic);
     if (!t.success) return { error: 'Invalid topic' };
