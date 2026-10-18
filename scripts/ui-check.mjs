@@ -22,15 +22,19 @@ await shot('02-blogs');
 await page.evaluate(() => window.scrollTo(0, 900));
 await page.waitForTimeout(400);
 await shot('03-blogs-scrolled');
-await page.click('[data-testid=topic-pill-MUSIC]');
-await page.waitForURL(/topic=MUSIC/);
+// Topic slugs differ per DB, so take the first two from the rendered pills.
+const [topicA, topicB] = await page.$$eval('[data-testid^="topic-pill-"]:not([data-testid="topic-pill-ALL"])', (els) =>
+  els.map((e) => e.dataset.testid.slice('topic-pill-'.length)));
+await page.click(`[data-testid=topic-pill-${topicA}]`);
+await page.waitForURL(new RegExp(`topic=${topicA}`));
 await page.waitForTimeout(300);
-await shot('04-blogs-music');
+await shot('04-blogs-topic');
 
 // timings
 const t = async (fn) => { const s = Date.now(); await fn(); return Date.now() - s; };
 const pill = [];
-for (const slug of ['TECHNOLOGY', 'ALL', 'TECHNOLOGY', 'ALL', 'SCIENCE']) {
+// Ends on ALL: the hide timing below needs a card, and a topic may have none on Blogs.
+for (const slug of [topicB, 'ALL', topicB, topicA, 'ALL']) {
   pill.push(await t(async () => {
     await page.evaluate(() => (document.querySelector('[data-testid=feed-list]').__old = true));
     await page.click(`[data-testid=topic-pill-${slug}]`);
@@ -60,6 +64,10 @@ await shot('08-manage');
 await page.click('[data-testid=add-feed-btn]');
 await page.waitForTimeout(250);
 await shot('09-add-feed');
+await page.keyboard.press('Escape');
+await page.click('[data-testid=view-mode-tiles]');
+await page.goto(base + '/', { waitUntil: 'networkidle' });
+await shot('10-tiles');
 
 console.log(JSON.stringify({ pillMs: pill, hideMs: hide, errors }, null, 1));
 await browser.close();

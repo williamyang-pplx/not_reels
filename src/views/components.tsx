@@ -3,7 +3,7 @@ import { FEED_TYPE_LABELS, RYM_FEED_URL } from '../lib/constants';
 import { detectEmbedKind, extractRedditPost, extractYouTubeId } from '../lib/embed';
 import type { FeedItemDTO, SavedLinkDTO } from '../lib/queries';
 import type { FeedType, TopicRecord } from '../lib/types';
-import { decodeEntities, formatRelativeTime, topicColor } from '../lib/utils';
+import { decodeEntities, formatRelativeTime, reflowText, topicColor } from '../lib/utils';
 
 export function EmptyState({ message }: { message: string }) {
   return (
@@ -93,9 +93,20 @@ function safeHref(url: string): string | undefined {
   return /^https?:\/\//i.test(url) ? url : undefined;
 }
 
-function truncateSummary(summary: string): string {
+/**
+ * Summaries can be whole articles, so a card carries only an excerpt: about a screenful, which Tiles clamps to
+ * two lines in CSS. In the scroller the client swaps in the whole summary (/_f/summary/:id) for any card marked data-more.
+ */
+const SUMMARY_WORDS = 80;
+
+function Summary({ id, summary }: { id: string; summary: string }) {
   const words = summary.split(/\s+/);
-  return `${words.slice(0, 20).join(' ')}${words.length > 20 ? '…' : ''}`;
+  const cut = words.length > SUMMARY_WORDS;
+  return (
+    <p class="sum" data-more={cut ? id : undefined}>
+      {cut ? `${words.slice(0, SUMMARY_WORDS).join(' ')}…` : reflowText(summary)}
+    </p>
+  );
 }
 
 function parseRymMusicRec(item: FeedItemDTO) {
@@ -198,7 +209,7 @@ export function FeedCard({ item: raw, now }: { item: FeedItemDTO; now: Date }) {
             </div>
           </>
         ) : (
-          item.summary && <p class="sum">{truncateSummary(item.summary)}</p>
+          item.summary && <Summary id={item.id} summary={item.summary} />
         )}
       </a>
       {youTubeId && <YouTubeFacade id={youTubeId} title={item.title} />}

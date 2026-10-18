@@ -14,9 +14,17 @@ execFileSync('sqlite3', [src, `.backup ${db}`]);
 const now = Date.now();
 const rows = Array.from({ length: 120 }, (_, i) =>
   `('e2e-item-${i}','e2e-feed','g${i}','Synthetic item ${i}','https://example.com/e2e/${i}',${now - (i + 1) * 3600_000},${i},${now})`);
+// The flows below use the NEWS and TECHNOLOGY topics; make sure the copy has them whatever the source DB holds.
+execFileSync('sqlite3', [db, `INSERT OR IGNORE INTO Topic (slug,label) VALUES ('NEWS','News'),('TECHNOLOGY','Technology');`]);
 execFileSync('sqlite3', [db, `INSERT INTO Feed (id,name,url,sourceKind,type,isActive,fetchErrorCount,createdAt,updatedAt) VALUES ('e2e-feed','Synthetic','https://example.invalid/feed.xml','RSS','FORUM',1,0,${now},${now});
 INSERT INTO FeedTopic VALUES ('e2e-feed','TECHNOLOGY');
 INSERT INTO FeedItem (id,feedId,guid,title,link,publishedAt,sourceRank,fetchedAt) VALUES ${rows.join(',')};`]);
+// A YouTube item a minute in the future, so it is first under New on Blogs/Videos whatever the DB holds.
+const YT = 'dQw4w9WgXcQ';
+const LONG = Array.from({ length: 150 }, (_, i) => `word${i}`).join(' '); // longer than a card's 80-word excerpt
+execFileSync('sqlite3', [db, `INSERT INTO Feed (id,name,url,sourceKind,type,isActive,fetchErrorCount,createdAt,updatedAt) VALUES ('e2e-yt','Synthetic YT','https://example.invalid/yt.xml','RSS','BLOG',1,0,${now},${now});
+INSERT INTO FeedTopic VALUES ('e2e-yt','TECHNOLOGY');
+INSERT INTO FeedItem (id,feedId,guid,title,link,summary,publishedAt,sourceRank,fetchedAt) VALUES ('e2e-yt-0','e2e-yt','yt0','Synthetic video','https://www.youtube.com/watch?v=${YT}','${LONG}',${now + 60_000},0,${now});`]);
 const server = spawn('node', ['dist/server.mjs'], { env: { ...process.env, DATABASE_URL: `file:${db}`, PORT: '3300' }, stdio: 'inherit' });
 await new Promise((r) => setTimeout(r, 500));
 const base = 'http://localhost:3300';
@@ -33,6 +41,17 @@ try {
   await page.goto(base + '/', { waitUntil: 'networkidle' });
   assert.equal(await page.getAttribute('[data-testid=type-pill-FORUM]', 'aria-current'), 'true');
   ok('default view is Forums / All');
+
+  // Scroller is the default: snapping, one card per screen below the nav.
+  assert.equal(await page.getAttribute('html', 'data-mode'), 'reels');
+  const snap = await page.evaluate(() => {
+    const card = document.querySelector('[data-testid=feed-card]').getBoundingClientRect().height;
+    const nav = document.querySelector('[data-testid=nav-bar]').getBoundingClientRect().height;
+    return { type: getComputedStyle(document.documentElement).scrollSnapType, card, rest: innerHeight - nav };
+  });
+  assert.match(snap.type, /mandatory/);
+  assert.ok(snap.card >= snap.rest - 1, `card ${snap.card}px, screen below nav ${snap.rest}px`);
+  ok('scroller is the default view');
 
   // Save the first card -> leaves the feed, shows up in Saved.
   const firstTitle = await page.textContent('[data-testid=feed-card] h3');
@@ -96,11 +115,58 @@ try {
     ok('infinite scroll loads the next page');
   } else throw new Error('expected a second page in New mode');
 
+  // Scroller autoplays the video in view, muted, and unloads it once it scrolls away.
+  const ytFrame = `iframe[src*="youtube-nocookie.com/embed/${YT}"]`;
+  const openBlogsNew = async () => {
+    await page.click('[data-testid=type-pill-BLOG]');
+    await page.waitForURL(/type=BLOG/);
+    await page.click('[data-testid=sort-new]');
+    await page.waitForSelector('[data-testid=feed-list][data-current-sort=new] [data-act=yt]', { state: 'attached' });
+  };
+  await openBlogsNew();
+  await page.locator('[data-act=yt]').first().locator('..').scrollIntoViewIfNeeded();
+  await page.waitForSelector(`${ytFrame}[src*="mute=1"]`, { state: 'attached' });
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.waitForSelector(ytFrame, { state: 'detached' });
+  assert.equal(await page.locator('[data-act=yt]').first().isHidden(), false);
+  ok('scroller autoplays muted and unloads off-screen');
+  // The scroller swaps the card's excerpt for the whole summary.
+  await page.waitForFunction(() => {
+    const sum = document.querySelector('[data-act=yt]')?.closest('article')?.querySelector('.sum');
+    return sum && !sum.hasAttribute('data-more') && sum.textContent.trim().endsWith('word149');
+  });
+  ok('scroller shows the whole summary, not the excerpt');
+
   await page.click('[data-testid=nav-manage-link]');
   await page.waitForSelector('[data-testid=topics-manager]');
   await page.click('[data-testid=type-pill-FORUM]').catch(() => {});
   assert.equal(await page.$('[data-testid=type-filter-row]'), null);
   ok('manage page hides filter rows');
+
+  // View toggle: Tiles persists across reload and keeps tap-to-play; then back to the default.
+  const selected = (m) => page.getAttribute(`[data-testid=view-mode-${m}]`, 'aria-selected');
+  assert.equal(await selected('reels'), 'true');
+  await page.click('[data-testid=view-mode-tiles]');
+  assert.equal(await page.getAttribute('html', 'data-mode'), 'tiles');
+  assert.equal(await selected('tiles'), 'true');
+  await page.reload({ waitUntil: 'networkidle' });
+  assert.equal(await page.getAttribute('html', 'data-mode'), 'tiles');
+  assert.equal(await selected('tiles'), 'true');
+  await page.goto(base + '/', { waitUntil: 'networkidle' });
+  await openBlogsNew();
+  await page.locator('[data-act=yt]').first().scrollIntoViewIfNeeded();
+  await page.waitForTimeout(1000);
+  assert.equal(await page.$(ytFrame), null);
+  await page.locator('[data-act=yt]').first().click();
+  const src = await page.getAttribute(ytFrame, 'src');
+  assert.ok(!src.includes('mute=1'), src);
+  ok('tiles keep tap-to-play (unmuted)');
+  await page.click('[data-testid=nav-manage-link]');
+  await page.waitForSelector('[data-testid=topics-manager]');
+  await page.click('[data-testid=view-mode-reels]');
+  await page.reload({ waitUntil: 'networkidle' });
+  assert.equal(await page.getAttribute('html', 'data-mode'), 'reels');
+  ok('view toggle persists across reload');
 
   // Topic add (slug derivation), duplicate error, delete with confirm.
   await page.fill('[data-testid=topic-input]', 'Board Games!');

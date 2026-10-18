@@ -27,6 +27,10 @@ button { -webkit-user-select: none; user-select: none; }
 .topic-pill[aria-current] { background: hsl(210 30% 20%); color: hsl(0 0% 98%); border-color: hsl(210 30% 20%); }
 .pill:active { transform: scale(.97); }
 
+/* NavBar height on feed routes: title row 50px + type pills 44px + topic pills 42px + 1px border.
+   Static, so the scroller is laid out right before the deferred JS runs. */
+:root { --nav-h: calc(137px + env(safe-area-inset-top)); }
+
 .seg button { transition: background-color .12s, color .12s; }
 .seg button[aria-selected='true'] { background: hsl(210 90% 56%); color: #fff; }
 .seg button[aria-selected='false']:active { background: hsl(210 30% 20%); }
@@ -64,6 +68,29 @@ button { -webkit-user-select: none; user-select: none; }
   .ytm { @apply inline-flex items-center gap-1.5; }
   .ytm img { @apply h-4 w-4 shrink-0; }
 }
+
+/* Scroller mode: one feed card per screen, snapped under the sticky nav. Only the feed has snap areas,
+   so /saved and /manage scroll freely. No modal renders on the feed; one added later must also suspend
+   snap while it holds the scroll lock. Off-screen cards keep content-visibility: they are still a screen tall. */
+html[data-mode='reels'] { scroll-snap-type: y mandatory; scroll-padding-top: var(--nav-h); }
+html[data-mode='reels'] [data-view='feed'] { scroll-snap-align: start; } /* keeps the toolbar reachable */
+html[data-mode='reels'] .feed-items { gap: 0; }
+html[data-mode='reels'] .fc {
+  height: calc(100dvh - var(--nav-h));
+  display: flex; flex-direction: column; padding: 20px;
+  scroll-snap-align: start; scroll-snap-stop: always;
+}
+/* Content reads from the top; the summary is never cut here: it fills the space left and scrolls inside the
+   card (the client swaps in the whole text), so the badges and actions stay at the bottom of the screen. */
+html[data-mode='reels'] .fc .cl { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; } /* shrinks to fit, never stretches */
+html[data-mode='reels'] .fc .meta { @apply text-sm mb-3 shrink-0; }
+html[data-mode='reels'] .fc h3 { @apply shrink-0; font-size: 24px; line-height: 1.25; }
+html[data-mode='reels'] .fc .sum {
+  @apply mt-4; color: hsl(0 0% 84%); font-size: 17px; line-height: 1.55;
+  display: block; -webkit-line-clamp: none; flex: 1 1 auto; min-height: 0; overflow-y: auto; white-space: pre-line;
+}
+html[data-mode='reels'] .fc iframe[data-src] { height: 40dvh; } /* a Reddit thread still fits on the screen */
+html[data-mode='reels'] .fc .badges { @apply mt-auto pt-4; }
 
 .row-btn { font-size: .75rem; line-height: 1rem; padding: 0 .625rem; height: 1.875rem; border-radius: .375rem; border: 1px solid hsl(0 0% 18%); }
 .row-btn:active { background: hsl(210 30% 20%); }

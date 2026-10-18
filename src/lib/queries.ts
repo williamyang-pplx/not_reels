@@ -216,6 +216,12 @@ export function listFeedItems(q: FeedItemsQuery): { items: FeedItemDTO[]; nextCu
   };
 }
 
+/** The whole stored summary of one item; cards only carry an excerpt. `undefined` if there is no such item. */
+export function getItemSummary(id: string): string | null | undefined {
+  const row = getDb().prepare('SELECT "summary" FROM "FeedItem" WHERE "id" = ?').get(id) as { summary: string | null } | undefined;
+  return row && row.summary;
+}
+
 // ---------- saved links ----------
 
 interface SavedLinkRow {

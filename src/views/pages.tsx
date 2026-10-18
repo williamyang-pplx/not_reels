@@ -33,15 +33,20 @@ export function viewHref(type: FilterType, topic: string): string {
   return q ? `${path}?${q}` : path;
 }
 
+// Runs before first paint, so a stored "tiles" choice never flashes the scroller (the CSP allows
+// inline scripts). The key matches setMode in client/app.ts.
+const MODE_BOOT = `try{if(localStorage.getItem('nr-view')==='tiles')document.documentElement.dataset.mode='tiles'}catch(e){}`;
+
 export function Document({ children }: { children: Child }) {
   const { css, js } = assets();
   return (
     <>
       {raw('<!doctype html>')}
-      <html lang="en">
+      <html lang="en" data-mode="reels">
         <head>
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+          <script>{raw(MODE_BOOT)}</script>
           <meta name="theme-color" content="#0a0a0a" />
           <title>not-brainrot</title>
           <meta name="description" content="Personal RSS feed compiler" />
@@ -238,6 +243,18 @@ export function SavedPage({ links, topics }: { links: SavedLinkDTO[]; topics: To
 export function ManagePage({ topics, feeds }: { topics: TopicRecord[]; feeds: FeedDTO[] }) {
   return (
     <div class="pt-3 flex flex-col gap-3" data-view="manage">
+      {/* The server doesn't know the mode (it lives in localStorage), so the client sets aria-selected. */}
+      <section data-testid="view-mode" class="rounded-lg border border-border bg-card p-3 flex items-center justify-between gap-3">
+        <h2 class="text-sm font-bold">Feed view</h2>
+        <div class="seg flex shrink-0 rounded-full border border-border overflow-hidden text-sm" role="tablist">
+          <button type="button" role="tab" data-set-mode="reels" data-testid="view-mode-reels" class="h-9 px-3.5">
+            Scroller
+          </button>
+          <button type="button" role="tab" data-set-mode="tiles" data-testid="view-mode-tiles" class="h-9 px-3.5">
+            Tiles
+          </button>
+        </div>
+      </section>
       <section data-testid="topics-manager" class="rounded-lg border border-border bg-card p-3 flex flex-col gap-3">
         <div class="flex items-center justify-between">
           <h2 class="text-sm font-bold">Topics</h2>

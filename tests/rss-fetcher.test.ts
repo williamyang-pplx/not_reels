@@ -40,9 +40,31 @@ describe('rss-fetcher normalization', () => {
     expect(out.publishedAt.toISOString()).toBe('2026-04-14T10:00:00.000Z');
   });
 
-  it('falls back to contentEncoded for summary', () => {
-    const out = normalizeItem({ guid: 'g', link: 'L', contentEncoded: '<p>full</p>' });
-    expect(out.summary).toBe('<p>full</p>');
+  it('takes the full <content:encoded> text over a shorter <description>', () => {
+    const out = normalizeItem({ guid: 'g', link: 'L', contentSnippet: 'Teaser.', 'content:encodedSnippet': 'Full body.\nSecond para.' });
+    expect(out.summary).toBe('Full body.\nSecond para.');
+  });
+
+  it('keeps the description when it is the longer text', () => {
+    const out = normalizeItem({ guid: 'g', link: 'L', contentSnippet: 'A long description here.', 'content:encodedSnippet': 'Short.' });
+    expect(out.summary).toBe('A long description here.');
+  });
+
+  it('reads an Atom <summary>, tags removed', () => {
+    const out = normalizeItem({ guid: 'g', link: 'L', summary: '<p>One &amp; two</p><p>Three</p>' });
+    expect(out.summary).toBe('One &amp; two\nThree');
+  });
+
+  it('reads a YouTube description from media:group without links, timestamps, dividers or hashtags', () => {
+    const description = 'What this video is about.\nPatreon: https://patreon.com/x\n\n0:00 Intro\n(1:02:03) Outro\n-----\n#math #science\nMore prose.';
+    const out = normalizeItem({ guid: 'g', link: 'L', mediaGroup: { 'media:description': [description] } });
+    expect(out.summary).toBe('What this video is about.\n\nMore prose.');
+  });
+
+  it('drops emptied link labels and the credits roll from a YouTube description', () => {
+    const description = 'How a CPU works.\nSocial media:\nhttps://x.com/y\nIt is simpler than it looks.\nSpecial thanks to these supporters:\nAlice, Bob';
+    const out = normalizeItem({ guid: 'g', link: 'L', mediaGroup: { 'media:description': [description] } });
+    expect(out.summary).toBe('How a CPU works.\nIt is simpler than it looks.');
   });
 
   it('returns null author/summary when absent', () => {

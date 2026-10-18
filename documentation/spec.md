@@ -280,7 +280,7 @@ Make the fetcher, the local provider registry and the concurrency injectable thr
 | `guid` | the first non-empty trimmed value of `guid` or `link`. If both are empty, use the sha256 hex of `` `${title}|${isoDate ?? pubDate ?? ''}` `` |
 | `title` | trimmed `title`, or `"(untitled)"` |
 | `link` | trimmed `link`, or `""` |
-| `summary` | the first defined value of `contentSnippet`, `content`, `contentEncoded`; trimmed; empty becomes null |
+| `summary` | the **longest** trimmed text among: `content:encodedSnippet` (the text of `<content:encoded>`), `contentSnippet ?? content`, Atom `<summary>` with tags removed, and YouTube's `<media:group><media:description>` without link, timestamp, divider, hashtag and empty-label lines and without its credits roll. Empty becomes null |
 | `author` | `creator` if defined, else `author`; trimmed; empty becomes null |
 | `publishedAt` | parse `isoDate ?? pubDate`. If it is missing or invalid, use `now` |
 | `sourceRank` | the item's index in the source feed |
@@ -408,6 +408,9 @@ All pages are `force-dynamic`. The root layout wraps the page in the React Query
     - On error, the status text reads `Refresh failed`.
     - The status text clears when a new refresh starts.
   - **Sort segmented control:** **Hot** (`recommended`, the default), **New**, **Random**. This is local component state and is not in the URL.
+- **View mode:** **Scroller** (the default) or **Tiles**, chosen in Manage (§8.8) and kept per device in `localStorage`.
+  - Scroller: each card fills the screen below the sticky nav, and the page snaps one card per swipe.
+  - Tiles: the plain card list.
   - The status text sits right-aligned and muted.
 - **List:** uses `useInfiniteQuery`. `getNextPageParam` is `nextCursor`, so only New mode pages.
   - An `IntersectionObserver` watches a sentinel `div` (`h-8`) after the list. It calls `fetchNextPage` when the sentinel is visible, `hasNextPage` is true and nothing is fetching.
@@ -419,9 +422,10 @@ All pages are `force-dynamic`. The root layout wraps the page in the React Query
 - **Link area:** the whole top section is an `<a target=_blank rel="noopener noreferrer">` to `item.link`. It contains:
   - Header row: the feed name (truncated, or `Unknown`) and the relative time.
   - The title.
-  - The summary, cut to its **first 20 words** with `…` and also `line-clamp-2`.
+  - The summary. The page carries its **first 80 words** with `…`, and Tiles clamps that to 2 lines (`line-clamp-2`). Scroller never cuts it: about one screen before a cut card comes into view, the client loads the whole text from `GET /_f/summary/:id` (plain text, hard line wraps joined into paragraphs). The text scrolls inside the card, so the badges and actions stay at the bottom of the screen.
 - **Embeds** below the link area:
   - **YouTube:** a lite-youtube embed in an `aspect-video` box with `params="rel=0"` and the play label `Play: <title>`.
+    In Tiles it plays on tap. In Scroller it plays muted when at least 60% of it is on screen, and goes back to the thumbnail when it leaves.
   - **Reddit:** an iframe of `https://www.redditmedia.com/r/<sub>/comments/<id>/<slug>/?ref_source=embed&ref=share&embed=true`, 500px tall, lazy-loaded. Its sandbox is `allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox`.
 - **Badges:** the TopicBadge for the first topic and a TypeBadge.
 - **Actions** (small text buttons):
@@ -461,21 +465,22 @@ An item uses this variant when `feedUrl === 'local/rym_music_recs'` or its guid 
   - Creating or deleting a link invalidates `['saved-links']`.
 
 ### 8.8 Manage page (`/manage`)
-1. **Topics section** (a card):
+1. **Feed view** (a card at the top): a **Scroller | Tiles** segmented control that sets the view mode (§8.3).
+2. **Topics section** (a card):
    - The header "Topics" and the topic count.
    - An inline form: a text input (placeholder `New topic (e.g. Gaming)`) and an **Add** button.
      - The slug comes from the label: uppercase it, replace each run of non-`[A-Z0-9]` characters with `_`, and trim leading and trailing `_`.
      - If the slug is empty, show the error `Label must contain letters or digits`.
      - API errors (for example a duplicate) show inline. On success, the input clears and `['topics']` is invalidated.
    - Topic chips (label plus a red **×**). Clicking × opens `window.confirm("Delete topic "<label>"? This will also delete all feeds and saved links under this topic.")`. If confirmed, it calls DELETE and invalidates topics, feeds, feed-items and saved-links.
-2. **"+ Add feed"** button. It opens the **Add a feed** modal, which has:
+3. **"+ Add feed"** button. It opens the **Add a feed** modal, which has:
    - Name (required)
    - URL (text, required, placeholder `https://example.com/rss.xml or local/rym_music_recs`)
    - A type `<select>` (Forum or Blog, default Forum)
    - A **TopicCheckboxList**
    - Buttons: Cancel and "Add feed" ("Adding…" while pending). Submit is disabled until at least one topic is checked, and it validates again on submit ("Pick at least one topic").
    - On success, the form resets, the modal closes and `['feeds']` is invalidated.
-3. **The feed list.** The states are `Loading…` and `No feeds yet. Add your first one above.`. Each feed row (a card) shows:
+4. **The feed list.** The states are `Loading…` and `No feeds yet. Add your first one above.`. Each feed row (a card) shows:
    - The TypeBadge, a TopicBadge for **every** topic, and a red uppercase `paused` tag when the feed is inactive.
    - The name, and the URL (muted, `break-all`).
    - Buttons:
@@ -496,7 +501,7 @@ An item uses this variant when `feedUrl === 'local/rym_music_recs'` or its guid 
 - Feed page: `feed-list`, `refresh-button`, `refresh-status`, `sort-{recommended|new|random}`, `sentinel`, `empty-state`.
 - Feed cards: `feed-card`, `save-feed-item-btn`, `hide-feed-item-btn`, `archive-feed-item-btn`, `youtube-music-feed-item-link`.
 - Saved page: `saved-link-card`, `saved-link-delete`, `add-saved-link-btn`, `add-saved-link-modal`.
-- Manage page: `add-feed-btn`, `add-feed-modal`, `edit-feed-modal`, `feed-row`, `feed-pause-btn`, `feed-edit-btn`, `feed-delete-btn`, `topics-manager`, `topic-input`, `add-topic-btn`, `topic-chip`, `delete-topic-{slug}`, `topic-checkbox-{slug}`.
+- Manage page: `view-mode`, `view-mode-reels`, `view-mode-tiles`, `add-feed-btn`, `add-feed-modal`, `edit-feed-modal`, `feed-row`, `feed-pause-btn`, `feed-edit-btn`, `feed-delete-btn`, `topics-manager`, `topic-input`, `add-topic-btn`, `topic-chip`, `delete-topic-{slug}`, `topic-checkbox-{slug}`.
 
 ## 9. Visual design, PWA and security
 

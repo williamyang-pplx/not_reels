@@ -9,7 +9,12 @@ export type RawRssItem = {
   isoDate?: string;
   contentSnippet?: string;
   content?: string;
-  contentEncoded?: string;
+  /** rss-parser's text-only copy of <content:encoded>, the full body some feeds send beside a short <description>. */
+  'content:encodedSnippet'?: string;
+  /** Atom <summary> (HTML). */
+  summary?: string;
+  /** YouTube puts the video description only in <media:group><media:description>. */
+  mediaGroup?: { 'media:description'?: string[] };
   creator?: string;
   author?: string;
 };
@@ -33,7 +38,7 @@ export const parser = new Parser({
   customFields: {
     item: [
       ['media:content', 'mediaContent'],
-      ['content:encoded', 'contentEncoded'],
+      ['media:group', 'mediaGroup'],
     ],
   },
 }) as Parser<unknown, RawRssItem>;
@@ -73,9 +78,12 @@ export function normalizeItem(
   const guid = computeGuid(item);
   const title = (item.title ?? '').trim() || '(untitled)';
   const link = (item.link ?? '').trim();
-  const summary =
-    (item.contentSnippet ?? item.content ?? item.contentEncoded ?? '').trim() ||
-    null;
+  const summary = longestText([
+    item['content:encodedSnippet'],
+    item.contentSnippet ?? item.content,
+    item.summary && htmlToText(item.summary),
+    item.mediaGroup?.['media:description']?.[0] && cleanVideoDescription(item.mediaGroup['media:description'][0]),
+  ]);
   const author = (item.creator ?? item.author ?? '').trim() || null;
   const dateStr = item.isoDate ?? item.pubDate;
   const parsed = dateStr ? new Date(dateStr) : null;
@@ -89,6 +97,40 @@ export function normalizeItem(
     publishedAt,
     sourceRank,
   };
+}
+
+/** The longest candidate wins: a feed's full body is not always the field one would guess (smol.ai's is shorter). */
+function longestText(candidates: (string | null | undefined | false)[]): string | null {
+  let best = '';
+  for (const c of candidates) {
+    const t = c ? c.trim() : '';
+    if (t.length > best.length) best = t;
+  }
+  return best || null;
+}
+
+/** Tags out, block ends turned into line breaks. Entities are left for the display layer to decode. */
+function htmlToText(html: string): string {
+  return html.replace(/<(?:br|\/p|\/div|\/li|\/h[1-6]|\/blockquote)\b[^>]*>/gi, '\n').replace(/<[^>]*>/g, '');
+}
+
+/** YouTube descriptions are mostly links, timestamps, hashtags and credits; keep the prose. */
+function cleanVideoDescription(text: string): string {
+  const lines = text.split('\n');
+  const credits = lines.findIndex((l) => /^\s*(special thanks|thanks to (all )?(my|our|these)|this video (was|is) (sponsored|made possible))/i.test(l));
+  return (credits >= 0 ? lines.slice(0, credits) : lines)
+    .filter((line) => {
+      const l = line.trim();
+      return !(
+        /https?:\/\//i.test(l) || // sponsor, social and merch links
+        /^\(?\d{1,2}:\d{2}(?::\d{2})?\)?(\s|$)/.test(l) || // chapter timestamps
+        /^[-—–_=*•~\s]{3,}$/.test(l) || // dividers
+        /^(#[\p{L}\p{N}_]+\s*)+$/u.test(l) || // hashtag lines
+        /^[\p{L}\s&/]{1,30}:$/u.test(l) // a label like "Social media:" whose links were dropped
+      );
+    })
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n');
 }
 
 export function normalizeAll(items: RawRssItem[], now: Date = new Date()): NormalizedItem[] {
