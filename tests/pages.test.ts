@@ -164,39 +164,6 @@ describe('GET /saved and /manage', () => {
   });
 });
 
-describe('summaries', () => {
-  const long = Array.from({ length: 120 }, (_, i) => `w${i}`).join(' ') + '\n\nLast &amp; paragraph.';
-  const seedSummaries = async () => {
-    const feed = createFeed();
-    seedItems(feed.id, 2);
-    const { getDb } = await import('../src/db');
-    const ids = getDb().prepare('SELECT "id" FROM "FeedItem" WHERE "feedId" = ? ORDER BY "publishedAt" DESC').all(feed.id) as { id: string }[];
-    getDb().prepare('UPDATE "FeedItem" SET "summary" = ? WHERE "id" = ?').run(long, ids[0].id);
-    getDb().prepare('UPDATE "FeedItem" SET "summary" = ? WHERE "id" = ?').run('Short one.', ids[1].id);
-    return ids.map((r) => r.id);
-  };
-
-  it('cards carry an 80-word excerpt, marking cut ones with the item id for the scroller', async () => {
-    const [longId] = await seedSummaries();
-    const { body } = await html('/?sort=new');
-    expect(body).toContain(`<p class="sum" data-more="${longId}">w0 w1`);
-    expect(body).toContain('w79…</p>');
-    expect(body).not.toContain('w80');
-    expect(body).toContain('<p class="sum">Short one.</p>');
-  });
-
-  it('GET /_f/summary/:id returns the whole summary as plain text, entities decoded', async () => {
-    const [longId] = await seedSummaries();
-    const res = await request(`/_f/summary/${longId}`);
-    expect(res.status).toBe(200);
-    expect(res.headers.get('Content-Type')).toContain('text/plain');
-    const text = await res.text();
-    expect(text.split(/\s+/)).toHaveLength(123);
-    expect(text.endsWith('\n\nLast & paragraph.')).toBe(true);
-    expect((await request('/_f/summary/nope')).status).toBe(404);
-  });
-});
-
 describe('GET /_f/items', () => {
   it('returns the next page of cards with a sentinel cursor for sort=new', async () => {
     const feed = createFeed();

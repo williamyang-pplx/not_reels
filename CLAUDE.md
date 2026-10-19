@@ -23,8 +23,6 @@ The design is in `documentation/low_level_plan.md` and `documentation/framework_
     old React Query keys) and prefetches on `pointerdown`.
   - Save, Hide and saved-link Delete are optimistic: the card leaves on tap and comes back on error.
   - Sort is client state. It is kept across pill changes on `/` and reset when `/` is entered from another page. It never goes in the URL.
-  - The feed is a scroller: one card per screen (CSS scroll-snap). `hydrate()` attaches the YouTube autoplay observer.
-  - Cards carry an 80-word summary excerpt (`data-more` marks cut ones). The client loads the whole text from `/_f/summary/:id`; never inline full summaries, some are whole articles.
 - **Service worker** (`client/sw.ts`): stale-while-revalidate for `/`, `/saved` and `/manage`; cache-first for hashed assets.
   Pages carry `data-rendered`. The client revalidates a page that is older than 5 s.
 - **Refresh** is manual only (`POST /api/feed-items/refresh`). rss-parser is imported lazily to keep it off the cold path.

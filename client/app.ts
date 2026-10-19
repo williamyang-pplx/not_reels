@@ -162,7 +162,7 @@ async function navigate(href: string, opts: { push?: boolean; scroll?: number | 
     const seen = mutations;
     load(key, true)
       .then((html) => {
-        if (token === navToken && seen === mutations && html !== hit.html && window.scrollY < 40 && sort !== 'random' && !playing()) {
+        if (token === navToken && seen === mutations && html !== hit.html && window.scrollY < 40 && sort !== 'random') {
           swap(html, null);
         }
       })
@@ -215,54 +215,6 @@ const frameObserver =
       )
     : null;
 
-// The YouTube video whose box is at least 60% on screen plays, muted because iOS blocks
-// unmuted autoplay without a tap; one that drops below 60% goes back to its thumbnail. (Check the ratio:
-// isIntersecting stays true at any ratio above 0.)
-const autoplayObserver =
-  'IntersectionObserver' in window
-    ? new IntersectionObserver(
-        (entries) => {
-          for (const e of entries) {
-            const btn = $<HTMLElement>('[data-act="yt"]', e.target)!;
-            if (e.intersectionRatio >= 0.6) playYouTube(btn, true);
-            else stopYouTube(btn);
-          }
-        },
-        { threshold: 0.6 },
-      )
-    : null;
-
-// A summary is never cut: cards carry an excerpt (data-more holds the item id), and the whole text
-// is fetched once the card is within a screen of the viewport. Kept per item, so revisiting a view is instant.
-const fullSummaries = new Map<string, string>();
-const summaryObserver =
-  'IntersectionObserver' in window
-    ? new IntersectionObserver(
-        (entries) => {
-          for (const e of entries) if (e.isIntersecting) void loadSummary(e.target as HTMLElement);
-        },
-        { rootMargin: '100% 0px' },
-      )
-    : null;
-
-async function loadSummary(el: HTMLElement) {
-  const id = el.dataset.more!;
-  summaryObserver?.unobserve(el);
-  el.removeAttribute('data-more'); // in flight: a hydrate() meanwhile must not observe it again
-  try {
-    let text = fullSummaries.get(id);
-    if (text === undefined) {
-      const res = await fetch(`/_f/summary/${encodeURIComponent(id)}`);
-      if (!res.ok) throw new Error(String(res.status));
-      text = await res.text();
-      fullSummaries.set(id, text);
-    }
-    el.textContent = text;
-  } catch {
-    el.dataset.more = id; // keep the excerpt; the next render retries
-  }
-}
-
 function hydrate() {
   for (const f of $$<HTMLIFrameElement>('iframe[data-src]:not([src])')) {
     if (frameObserver) frameObserver.observe(f);
@@ -273,12 +225,6 @@ function hydrate() {
     status.textContent = refreshStatus;
     status.hidden = false;
   }
-  autoplayObserver?.disconnect();
-  summaryObserver?.disconnect();
-  // Observe the box, not the button: a hidden (playing) button has no box and would read as off-screen.
-  // After loadMore this re-observes boxes already playing; playYouTube is a no-op for those.
-  for (const b of $$('[data-act="yt"]')) autoplayObserver?.observe(b.parentElement!);
-  for (const el of $$('.sum[data-more]')) summaryObserver?.observe(el);
   observer?.disconnect();
   const sentinel = $<HTMLElement>('.sentinel[data-cursor]');
   if (!sentinel) return;
@@ -396,28 +342,15 @@ async function cardMutation(btn: HTMLButtonElement, card: HTMLElement, kind: 'sa
   }
 }
 
-/** Start the player. The facade is hidden rather than removed, so stopYouTube can put it back. */
-function playYouTube(btn: HTMLElement, muted = false) {
-  if (btn.hidden) return;
+function playYouTube(btn: HTMLElement) {
   const iframe = document.createElement('iframe');
-  iframe.src = `https://www.youtube-nocookie.com/embed/${btn.dataset.id}?autoplay=1&rel=0&playsinline=1${muted ? '&mute=1' : ''}`;
+  iframe.src = `https://www.youtube-nocookie.com/embed/${btn.dataset.id}?autoplay=1&rel=0&playsinline=1`;
   iframe.title = btn.getAttribute('aria-label') ?? 'YouTube video';
   iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
   iframe.allowFullscreen = true;
   iframe.className = 'absolute inset-0 w-full h-full border-0';
-  btn.hidden = true;
-  btn.after(iframe);
+  btn.replaceWith(iframe);
 }
-
-/** Unload a playing video back to its thumbnail. */
-function stopYouTube(btn: HTMLElement) {
-  if (!btn.hidden) return;
-  btn.nextElementSibling?.remove();
-  btn.hidden = false;
-}
-
-/** A video is playing: background re-renders must not swap it away (they would restart it). */
-const playing = () => !!$('[data-act="yt"][hidden]');
 
 async function refreshAll(btn: HTMLButtonElement) {
   const status = $('[data-testid="refresh-status"]')!;
@@ -707,7 +640,7 @@ if (Date.now() - renderedAt > 5_000) {
   const before = app.innerHTML;
   load(bootKey, true)
     .then((html) => {
-      if (app.innerHTML === before && window.scrollY < 40 && !playing()) swap(html, null);
+      if (app.innerHTML === before && window.scrollY < 40) swap(html, null);
     })
     .catch(() => {});
 }

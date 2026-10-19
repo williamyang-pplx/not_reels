@@ -184,7 +184,7 @@ export function FeedPage({
         </div>
         <span class="text-xs text-muted-foreground ml-auto whitespace-nowrap" data-testid="refresh-status" hidden></span>
       </div>
-      <div class="feed-items flex flex-col">
+      <div class="feed-items flex flex-col gap-3">
         {'error' in data ? (
           <EmptyState message="Failed to load feed." />
         ) : data.items.length === 0 ? (

@@ -3,7 +3,7 @@ import { RYM_FEED_URL } from '../lib/constants';
 import { detectEmbedKind, extractRedditPost, extractYouTubeId } from '../lib/embed';
 import type { FeedItemDTO, SavedLinkDTO } from '../lib/queries';
 import type { TopicRecord } from '../lib/types';
-import { decodeEntities, formatRelativeTime, reflowText, topicColor } from '../lib/utils';
+import { decodeEntities, formatRelativeTime, topicColor } from '../lib/utils';
 
 export function EmptyState({ message }: { message: string }) {
   return (
@@ -87,20 +87,9 @@ function safeHref(url: string): string | undefined {
   return /^https?:\/\//i.test(url) ? url : undefined;
 }
 
-/**
- * Summaries can be whole articles, so a card carries only an excerpt, about a screenful, for the first paint. The
- * client swaps in the whole summary (/_f/summary/:id) for any card marked data-more.
- */
-const SUMMARY_WORDS = 80;
-
-function Summary({ id, summary }: { id: string; summary: string }) {
+function truncateSummary(summary: string): string {
   const words = summary.split(/\s+/);
-  const cut = words.length > SUMMARY_WORDS;
-  return (
-    <p class="sum" data-more={cut ? id : undefined}>
-      {cut ? `${words.slice(0, SUMMARY_WORDS).join(' ')}…` : reflowText(summary)}
-    </p>
-  );
+  return `${words.slice(0, 20).join(' ')}${words.length > 20 ? '…' : ''}`;
 }
 
 function parseRymMusicRec(item: FeedItemDTO) {
@@ -159,7 +148,7 @@ function RedditEmbed({ subreddit, postId, slug, title }: { subreddit: string; po
         title={title || `Reddit thread in r/${subreddit}`}
         loading="lazy"
         sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-        class="block h-[40dvh] w-full"
+        class="block h-[500px] w-full"
       ></iframe>
     </div>
   );
@@ -184,7 +173,7 @@ export function FeedCard({ item: raw, now }: { item: FeedItemDTO; now: Date }) {
       data-topic={topic}
       data-title={raw.title !== shownTitle ? raw.title : undefined}
       data-href={safeHref(item.link) ? undefined : item.link}
-      class="card fc"
+      class={youTubeId || reddit ? 'card fc embed' : 'card fc'}
       style={`border-color:${topicColor(topic)}`}
     >
       <a href={safeHref(item.link)} target="_blank" rel="noopener noreferrer" class="cl">
@@ -203,7 +192,7 @@ export function FeedCard({ item: raw, now }: { item: FeedItemDTO; now: Date }) {
             </div>
           </>
         ) : (
-          item.summary && <Summary id={item.id} summary={item.summary} />
+          item.summary && <p class="sum">{truncateSummary(item.summary)}</p>
         )}
       </a>
       {youTubeId && <YouTubeFacade id={youTubeId} title={item.title} />}

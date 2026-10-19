@@ -21,12 +21,6 @@ execFileSync('sqlite3', [db, `INSERT OR IGNORE INTO Topic (slug,label) VALUES ('
 execFileSync('sqlite3', [db, `INSERT INTO Feed (id,name,url,sourceKind,isActive,fetchErrorCount,createdAt,updatedAt) VALUES ('e2e-feed','Synthetic','https://example.invalid/feed.xml','RSS',1,0,${now},${now});
 INSERT INTO FeedTopic VALUES ('e2e-feed','TECHNOLOGY');
 INSERT INTO FeedItem (id,feedId,guid,title,link,publishedAt,sourceRank,fetchedAt) VALUES ${rows.join(',')};`]);
-// A YouTube item a minute in the future, so it is first under New whatever the DB holds.
-const YT = 'dQw4w9WgXcQ';
-const LONG = Array.from({ length: 150 }, (_, i) => `word${i}`).join(' '); // longer than a card's 80-word excerpt
-execFileSync('sqlite3', [db, `INSERT INTO Feed (id,name,url,sourceKind,isActive,fetchErrorCount,createdAt,updatedAt) VALUES ('e2e-yt','Synthetic YT','https://example.invalid/yt.xml','RSS',1,0,${now},${now});
-INSERT INTO FeedTopic VALUES ('e2e-yt','TECHNOLOGY');
-INSERT INTO FeedItem (id,feedId,guid,title,link,summary,publishedAt,sourceRank,fetchedAt) VALUES ('e2e-yt-0','e2e-yt','yt0','Synthetic video','https://www.youtube.com/watch?v=${YT}','${LONG}',${now + 60_000},0,${now});`]);
 const server = spawn('node', ['dist/server.mjs'], { env: { ...process.env, DATABASE_URL: `file:${db}`, PORT: '3300' }, stdio: 'inherit' });
 await new Promise((r) => setTimeout(r, 500));
 const base = 'http://localhost:3300';
@@ -43,16 +37,6 @@ try {
   await page.goto(base + '/', { waitUntil: 'networkidle' });
   assert.equal(await page.getAttribute('[data-testid=type-pill-FEED]', 'aria-current'), 'true');
   ok('default view is Feed / All');
-
-  // The feed is a scroller: snapping, one card per screen below the nav.
-  const snap = await page.evaluate(() => {
-    const card = document.querySelector('[data-testid=feed-card]').getBoundingClientRect().height;
-    const nav = document.querySelector('[data-testid=nav-bar]').getBoundingClientRect().height;
-    return { type: getComputedStyle(document.documentElement).scrollSnapType, card, rest: innerHeight - nav };
-  });
-  assert.match(snap.type, /mandatory/);
-  assert.ok(snap.card >= snap.rest - 1, `card ${snap.card}px, screen below nav ${snap.rest}px`);
-  ok('feed is a scroller, one card per screen');
 
   // Save the first card -> leaves the feed, shows up in Saved.
   const firstTitle = await page.textContent('[data-testid=feed-card] h3');
@@ -115,23 +99,6 @@ try {
     await page.waitForFunction((n) => document.querySelectorAll('[data-testid=feed-card]').length > n, n);
     ok('infinite scroll loads the next page');
   } else throw new Error('expected a second page in New mode');
-
-  // The video in view autoplays, muted, and unloads once it scrolls away.
-  const ytFrame = `iframe[src*="youtube-nocookie.com/embed/${YT}"]`;
-  await page.click('[data-testid=sort-new]');
-  await page.waitForSelector('[data-testid=feed-list][data-current-sort=new] [data-act=yt]', { state: 'attached' });
-  await page.locator('[data-act=yt]').first().locator('..').scrollIntoViewIfNeeded();
-  await page.waitForSelector(`${ytFrame}[src*="mute=1"]`, { state: 'attached' });
-  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-  await page.waitForSelector(ytFrame, { state: 'detached' });
-  assert.equal(await page.locator('[data-act=yt]').first().isHidden(), false);
-  ok('video in view autoplays muted and unloads off-screen');
-  // The card's excerpt is swapped for the whole summary.
-  await page.waitForFunction(() => {
-    const sum = document.querySelector('[data-act=yt]')?.closest('article')?.querySelector('.sum');
-    return sum && !sum.hasAttribute('data-more') && sum.textContent.trim().endsWith('word149');
-  });
-  ok('card shows the whole summary, not the excerpt');
 
   await page.click('[data-testid=nav-manage-link]');
   await page.waitForSelector('[data-testid=topics-manager]');

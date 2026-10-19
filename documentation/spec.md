@@ -402,22 +402,20 @@ All pages are `force-dynamic`. The root layout wraps the page in the React Query
     - The status text clears when a new refresh starts.
   - **Sort segmented control:** **Hot** (`recommended`, the default), **New**, **Random**. This is local component state and is not in the URL.
   - The status text sits right-aligned and muted.
-- **Layout:** a scroller. Each card fills the screen below the sticky nav, and the page snaps one card per swipe.
 - **List:** uses `useInfiniteQuery`. `getNextPageParam` is `nextCursor`, so only New mode pages.
   - An `IntersectionObserver` watches a sentinel `div` (`h-8`) after the list. It calls `fetchNextPage` when the sentinel is visible, `hasNextPage` is true and nothing is fetching.
   - While fetching, it shows "Loading more…".
 - **Empty, loading and error states** use a centered muted message: `Failed to load feed.`, `Loading…`, or `No items match these filters yet.`.
 
 ### 8.4 FeedCard (standard)
-- **Container:** `rounded-lg border-2 bg-card`, one screen tall below the nav, with the border color from the first feed topic (§7).
+- **Container:** `rounded-lg border-2 bg-card p-4`, with the border color from the first feed topic (§7).
 - **Link area:** the whole top section is an `<a target=_blank rel="noopener noreferrer">` to `item.link`. It contains:
   - Header row: the feed name (truncated, or `Unknown`) and the relative time.
   - The title.
-  - The summary, never cut. The page carries its **first 80 words** with `…` for the first paint; about one screen before such a card comes into view, the client loads the whole text from `GET /_f/summary/:id` (plain text, hard line wraps joined into paragraphs). The text scrolls inside the card, so the badges and actions stay at the bottom of the screen.
+  - The summary, cut to its **first 20 words** with `…` and also `line-clamp-2`.
 - **Embeds** below the link area:
   - **YouTube:** a lite-youtube embed in an `aspect-video` box with `params="rel=0"` and the play label `Play: <title>`.
-    It plays muted when at least 60% of it is on screen, and goes back to the thumbnail when it leaves. A tap before then plays it with sound.
-  - **Reddit:** an iframe of `https://www.redditmedia.com/r/<sub>/comments/<id>/<slug>/?ref_source=embed&ref=share&embed=true`, `40dvh` tall (so the card fits on one screen), lazy-loaded. Its sandbox is `allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox`.
+  - **Reddit:** an iframe of `https://www.redditmedia.com/r/<sub>/comments/<id>/<slug>/?ref_source=embed&ref=share&embed=true`, 500px tall, lazy-loaded. Its sandbox is `allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox`.
 - **Badges:** the TopicBadge for the first topic.
 - **Actions** (small text buttons):
   - **Save:** shown only if the item has at least one topic. It runs `POST /api/saved-links {url: link, title, topic: feedTopics[0]}`. The label goes "Saving…", then "Saved!", and the button stays disabled after success. On success it invalidates **both** `['feed-items']` and `['saved-links']`.

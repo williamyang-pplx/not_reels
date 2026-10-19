@@ -267,11 +267,7 @@ export function EmptyState(p: { message: string }): JSX  // W9
    refresh runs every active feed through one pool of 12, and the nav pills are Feed | Saved. Legacy `type` query params and
    POST body fields are ignored, so stale service-worker caches keep working. Rolling back to an older build needs the volume
    snapshot (or `ALTER TABLE "Feed" ADD COLUMN "type" TEXT NOT NULL DEFAULT 'FORUM'`), because the old `migrate()` indexes `type`.
-16. **The feed is a scroller, with autoplay** (the spec's card list is gone). One card per screen, snapping under the
-   sticky nav; the layout is CSS only. The YouTube video in view autoplays muted, because iOS blocks unmuted autoplay.
-   Summaries are never cut: cards carry an 80-word excerpt (not 20) and the client swaps in the whole summary from
-   `/_f/summary/:id` before the card comes into view, because some summaries are whole articles (up to ~330 KB).
-17. **Summary is the longest text the feed sends** (spec §5.4 said the first of `contentSnippet`/`content`/`contentEncoded`).
+16. **Summary is the longest text the feed sends** (spec §5.4 said the first of `contentSnippet`/`content`/`contentEncoded`).
    Feeds like Book Riot and Lit Hub send a one-line `<description>` beside the full `<content:encoded>`, and YouTube's
    only text is `media:description`, so the first-defined rule kept the teaser or nothing.
 

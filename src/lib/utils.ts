@@ -18,30 +18,6 @@ export function formatRelativeTime(date: Date | string, now: Date = new Date()):
   return `${diffYr}y ago`;
 }
 
-/**
- * Feed text keeps the source's hard line wraps, and a single newline is also how it marks paragraphs. Keep a
- * break only where the line ends a sentence (or the source left a blank line) and join the rest with a space.
- * Paragraphs come back separated by a blank line.
- */
-export function reflowText(text: string): string {
-  const paragraphs: string[] = [];
-  let current = '';
-  for (const raw of text.split(/\r\n?|\n/)) {
-    const line = raw.trim();
-    if (!line) {
-      if (current) paragraphs.push(current);
-      current = '';
-    } else if (current && /[.!?:;…"”’)]$/.test(current)) {
-      paragraphs.push(current);
-      current = line;
-    } else {
-      current = current ? `${current} ${line}` : line;
-    }
-  }
-  if (current) paragraphs.push(current);
-  return paragraphs.join('\n\n');
-}
-
 export function truncate(str: string, max: number): string {
   if (str.length <= max) return str;
   return str.slice(0, max - 1).trimEnd() + '…';

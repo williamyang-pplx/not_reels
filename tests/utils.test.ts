@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatRelativeTime, reflowText, truncate, cn } from '../src/lib/utils';
+import { formatRelativeTime, truncate, cn } from '../src/lib/utils';
 import { computeGuid } from '../src/lib/guid';
 
 describe('utils', () => {
@@ -15,21 +15,6 @@ describe('utils', () => {
     });
     it('truncates and adds ellipsis when over limit', () => {
       expect(truncate('hello world', 6)).toBe('hello…');
-    });
-  });
-
-  describe('reflowText', () => {
-    it('joins hard-wrapped lines and keeps a break after a sentence', () => {
-      expect(reflowText('Hello! I needed bike lights. And I\nalready had some that I\nbought.\nI tried to fix them.')).toBe(
-        'Hello! I needed bike lights. And I already had some that I bought.\n\nI tried to fix them.',
-      );
-    });
-    it('treats blank lines and CRLF as paragraph breaks and trims the lines', () => {
-      expect(reflowText('  one\r\n\r\n two  \n\n\nthree')).toBe('one\n\ntwo\n\nthree');
-    });
-    it('leaves single-line text alone', () => {
-      expect(reflowText('Just one line')).toBe('Just one line');
-      expect(reflowText('')).toBe('');
     });
   });
 
