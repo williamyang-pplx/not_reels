@@ -47,6 +47,8 @@ button { -webkit-user-select: none; user-select: none; }
   .card h3 { @apply font-bold leading-snug text-foreground; font-size: 17px; }
   .sc .cl:active h3 { @apply underline; }
   .sum { @apply mt-1 text-sm text-muted-foreground leading-snug whitespace-pre-line; }
+  /* The whole summary once expanded: a panel that scrolls itself past its max-height (set by the client). */
+  .sum-full { @apply mt-1 rounded-md px-3 py-2 text-sm text-muted-foreground leading-snug whitespace-pre-line overflow-y-auto; background: hsl(0 0% 100% / .04); }
   .more { @apply text-xs text-primary py-2 -mb-1; }
   .more:active { opacity: .6; }
   .more:disabled { @apply opacity-50; }

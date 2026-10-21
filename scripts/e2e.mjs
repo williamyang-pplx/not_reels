@@ -22,7 +22,7 @@ execFileSync('sqlite3', [db, `INSERT INTO Feed (id,name,url,sourceKind,isActive,
 INSERT INTO FeedTopic VALUES ('e2e-feed','TECHNOLOGY');
 INSERT INTO FeedItem (id,feedId,guid,title,link,publishedAt,sourceRank,fetchedAt) VALUES ${rows.join(',')};`]);
 // An item a minute in the future, so it is first under New whatever the DB holds, with a summary past the card's excerpt.
-const LONG = Array.from({ length: 150 }, (_, i) => `word${i}`).join(' ');
+const LONG = Array.from({ length: 1500 }, (_, i) => `word${i}`).join(' '); // far more than 3 cards' worth
 execFileSync('sqlite3', [db, `INSERT INTO FeedItem (id,feedId,guid,title,link,summary,publishedAt,sourceRank,fetchedAt) VALUES ('e2e-long','e2e-feed','glong','Synthetic long summary','https://example.com/e2e/long','${LONG}',${now + 60_000},0,${now});`]);
 const server = spawn('node', ['dist/server.mjs'], { env: { ...process.env, DATABASE_URL: `file:${db}`, PORT: '3300' }, stdio: 'inherit' });
 await new Promise((r) => setTimeout(r, 500));
@@ -104,17 +104,25 @@ try {
   } else throw new Error('expected a second page in New mode');
 
   // A cut summary: More shows the whole text in the card, Less puts the excerpt back.
+  // The expanded card is capped at 3× its collapsed height; the rest of the text scrolls inside it.
   await page.evaluate(() => window.scrollTo(0, 0));
   const longCard = page.locator('[data-testid=feed-card]', { hasText: 'Synthetic long summary' });
-  const shownSum = longCard.locator('.sum:visible');
-  assert.match(await shownSum.textContent(), /word59…$/);
+  assert.match(await longCard.locator('.sum').textContent(), /word59…$/);
+  await longCard.scrollIntoViewIfNeeded(); // off screen, content-visibility reports a placeholder height
+  const collapsed = (await longCard.boundingBox()).height;
   await longCard.locator('[data-act=more]').click();
   await page.waitForFunction(() => document.querySelector('[data-act=more]')?.getAttribute('aria-expanded') === 'true');
-  assert.match(await shownSum.textContent(), /word149$/);
+  const panel = longCard.locator('.sum-full');
+  assert.match(await panel.textContent(), /word1499$/);
+  assert.equal(await longCard.locator('.sum').isHidden(), true);
+  const expanded = (await longCard.boundingBox()).height;
+  assert.ok(expanded <= collapsed * 3 + 1 && expanded > collapsed * 2.5, `collapsed ${collapsed}px, expanded ${expanded}px`);
+  assert.ok(await panel.evaluate((el) => el.scrollHeight > el.clientHeight), 'panel scrolls');
   await longCard.locator('[data-act=more]').click();
-  assert.match(await shownSum.textContent(), /word59…$/);
+  assert.equal(await panel.isHidden(), true);
+  assert.match(await longCard.locator('.sum').textContent(), /word59…$/);
   assert.equal(await longCard.locator('[data-act=more]').textContent(), 'More');
-  ok('More expands a cut summary in place, Less collapses it');
+  ok('More expands a cut summary into a scrolling panel (card ≤ 3× tall), Less collapses it');
 
   await page.click('[data-testid=nav-manage-link]');
   await page.waitForSelector('[data-testid=topics-manager]');

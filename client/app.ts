@@ -369,14 +369,18 @@ function playYouTube(btn: HTMLElement) {
 }
 
 // A card carries a summary excerpt. "More" fetches the whole text once (kept per item) and shows it in place of the
-// excerpt; "Less" puts the excerpt back and scrolls the card's top into view if it went under the nav.
+// excerpt, in a panel that scrolls on its own once the card would pass 3× its collapsed height, so the next card
+// is always a short swipe away. The panel sits outside the card's link, so reading it never opens the article.
+// "Less" puts the excerpt back and scrolls the card's top into view if it went under the nav.
 const fullSummaries = new Map<string, string>();
+const EXPANDED_CARD_FACTOR = 3;
 
 async function toggleSummary(btn: HTMLButtonElement, card: HTMLElement) {
-  const [excerpt, full] = $$('.sum', card);
+  const excerpt = $('.sum', card)!;
+  let full = $('.sum-full', card);
   if (btn.getAttribute('aria-expanded') === 'true') {
     excerpt.hidden = false;
-    full.hidden = true;
+    full!.hidden = true;
     btn.setAttribute('aria-expanded', 'false');
     btn.textContent = 'More';
     const navBottom = $('[data-testid="nav-bar"]')?.getBoundingClientRect().bottom ?? 0;
@@ -396,10 +400,14 @@ async function toggleSummary(btn: HTMLButtonElement, card: HTMLElement) {
         text = await res.text();
         fullSummaries.set(id, text);
       }
-      const p = document.createElement('p');
-      p.className = 'sum';
-      p.textContent = text;
-      excerpt.after(p);
+      // The excerpt's space plus (factor − 1) collapsed cards, so the expanded card is at most factor × as tall.
+      const height = (el: HTMLElement) => el.getBoundingClientRect().height;
+      const cap = height(excerpt) + (EXPANDED_CARD_FACTOR - 1) * height(card);
+      full = document.createElement('div');
+      full.className = 'sum-full';
+      full.style.maxHeight = `${cap}px`;
+      full.textContent = text;
+      $('a.cl', card)!.after(full);
     } catch {
       btn.textContent = 'Retry';
       return;
@@ -408,6 +416,7 @@ async function toggleSummary(btn: HTMLButtonElement, card: HTMLElement) {
     }
   } else {
     full.hidden = false;
+    full.scrollTop = 0;
   }
   excerpt.hidden = true;
   btn.setAttribute('aria-expanded', 'true');
