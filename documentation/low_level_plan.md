@@ -31,7 +31,7 @@ src/
   api/  topics.ts feeds.ts feed-items.ts saved-links.ts hidden-links.ts
   views/ layout.tsx nav-bar.tsx badges.tsx feed-card.tsx feed-page.tsx
          saved-page.tsx manage-page.tsx modal.tsx empty-state.tsx
-  pages.tsx                 # Hono router: /, /saved, /manage (+ partial mode), /_f/items
+  pages.tsx                 # Hono router: /, /saved, /manage (+ partial mode), /_f/items, /_f/summary/:id
 client/app.ts               # all browser JS
 src/styles.css              # tailwind input
 public/  manifest.json youtube_music_icon.png icons/{galaxy,icon-192,icon-512}.png
@@ -189,6 +189,7 @@ export const pagesRouter = new Hono()  // V1
 // GET /manage                                  → Layout(NavBar + ManagePage)
 // Header "X-Partial: 1" → return only the #app inner HTML (nav + main) with no <html>/<head>; Vary: X-Partial
 // GET /_f/items?topic&sort=new&cursor     → next page of FeedCards + new sentinel (infinite scroll)
+// GET /_f/summary/:id                      → one item's whole summary as plain text (a card's More button)
 // All HTML: Cache-Control: no-store
 ```
 

@@ -48,7 +48,8 @@ await build({
   external: ['better-sqlite3'],
   jsx: 'automatic',
   jsxImportSource: 'hono/jsx',
-  define: { __ASSETS__: JSON.stringify({ css, js: `/${jsName}` }) },
+  // build: names this CSS + JS pair, so a page started from an older cache can tell it is out of date.
+  define: { __ASSETS__: JSON.stringify({ css, js: `/${jsName}`, build: createHash('sha256').update(css).update(js).digest('hex').slice(0, 10) }) },
   // CJS deps (rss-parser/xml2js) call require(); give the ESM bundle one.
   banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" },
 });

@@ -146,30 +146,32 @@ export function listFeedItems(q: FeedItemsQuery): { items: FeedItemDTO[]; nextCu
     where.push('EXISTS (SELECT 1 FROM "FeedTopic" ft WHERE ft."feedId" = f."id" AND ft."topicSlug" = ?)');
     args.push(q.topic);
   }
+  if (q.sort === 'new' && q.cursor) {
+    where.push('i."publishedAt" < ?');
+    args.push(q.cursor.getTime());
+  }
 
-  let orderBy: string;
+  const from = `FROM "FeedItem" i JOIN "Feed" f ON f."id" = i."feedId" WHERE ${where.join(' AND ')}`;
+  let sql: string;
   let take: number;
   if (q.sort === 'recommended') {
-    orderBy = 'i."sourceRank" ASC, i."publishedAt" DESC';
+    // Round-robin over feeds (each feed's best item, then each one's second, ...), so a feed that posts a lot
+    // can't crowd the others out of the pool.
+    sql = `SELECT * FROM (
+             SELECT ${ITEM_COLUMNS},
+               ROW_NUMBER() OVER (PARTITION BY i."feedId" ORDER BY i."sourceRank" ASC, i."publishedAt" DESC) AS feedRank
+             ${from}
+           ) ORDER BY feedRank ASC, "sourceRank" ASC, "publishedAt" DESC LIMIT ?`;
     take = RELEVANT_FETCH_SIZE;
   } else if (q.sort === 'random') {
-    orderBy = 'i."publishedAt" DESC';
+    sql = `SELECT ${ITEM_COLUMNS} ${from} ORDER BY i."publishedAt" DESC LIMIT ?`;
     take = RELEVANT_FETCH_SIZE;
   } else {
-    if (q.cursor) {
-      where.push('i."publishedAt" < ?');
-      args.push(q.cursor.getTime());
-    }
-    orderBy = 'i."publishedAt" DESC';
+    sql = `SELECT ${ITEM_COLUMNS} ${from} ORDER BY i."publishedAt" DESC LIMIT ?`;
     take = q.limit + 1;
   }
 
-  const rows = db
-    .prepare(
-      `SELECT ${ITEM_COLUMNS} FROM "FeedItem" i JOIN "Feed" f ON f."id" = i."feedId"
-       WHERE ${where.join(' AND ')} ORDER BY ${orderBy} LIMIT ?`,
-    )
-    .all(...args, take) as ItemRow[];
+  const rows = db.prepare(sql).all(...args, take) as ItemRow[];
   const topics = topicsByFeed(rows.map((r) => r.feedId));
   const topicsOf = (r: ItemRow) => topics.get(r.feedId) ?? [];
 
@@ -200,6 +202,12 @@ export function listFeedItems(q: FeedItemsQuery): { items: FeedItemDTO[]; nextCu
     items: page.map((r) => mapItem(r, topicsOf(r))),
     nextCursor: hasMore ? toDate(page[page.length - 1].publishedAt).toISOString() : null,
   };
+}
+
+/** The whole stored summary of one item; cards only carry an excerpt. `undefined` if there is no such item. */
+export function getItemSummary(id: string): string | null | undefined {
+  const row = getDb().prepare('SELECT "summary" FROM "FeedItem" WHERE "id" = ?').get(id) as { summary: string | null } | undefined;
+  return row && row.summary;
 }
 
 // ---------- saved links ----------

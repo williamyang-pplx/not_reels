@@ -30,11 +30,11 @@ export function viewHref(type: FilterType, topic: string): string {
 }
 
 export function Document({ children }: { children: Child }) {
-  const { css, js } = assets();
+  const { css, js, build } = assets();
   return (
     <>
       {raw('<!doctype html>')}
-      <html lang="en">
+      <html lang="en" data-build={build}>
         <head>
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />

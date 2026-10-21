@@ -15,13 +15,16 @@ export interface RecommendationWeights {
   popularity: number;
   recency: number;
   topicAffinity: number;
-  feedVelocity: number;
 }
 
 export interface RecommendOptions {
   now?: Date;
   topicCounts?: Record<string, number>;
   weights?: Partial<RecommendationWeights>;
+  /** Score lost per item already placed from the same feed. */
+  feedRepeatPenalty?: number;
+  /** The most score a post can lose for being older than `STALE_AFTER_DAYS`. */
+  stalePenalty?: number;
   softBalanceStrength?: number;
   targetBlend?: number;
   applyTopicBalance?: boolean;
@@ -36,14 +39,17 @@ const DEFAULT_WEIGHTS: RecommendationWeights = {
   popularity: 0.6,
   recency: 0.15,
   topicAffinity: 0.15,
-  feedVelocity: 0.1,
 };
 
 const RECENCY_HALF_LIFE_HOURS = 36;
 const POPULARITY_RANK_HALF_LIFE = 4;
 const DEFAULT_TOPIC_AFFINITY = 0.5;
-const DEFAULT_BALANCE_STRENGTH = 0.25;
-const DEFAULT_TARGET_BLEND = 0.7;
+const DEFAULT_FEED_REPEAT_PENALTY = 0.2;
+const DEFAULT_BALANCE_STRENGTH = 1;
+const DEFAULT_TARGET_BLEND = 0.3;
+const STALE_AFTER_DAYS = 60;
+const STALE_HALF_LIFE_DAYS = 30;
+const DEFAULT_STALE_PENALTY = 0.5;
 
 function ageHours(publishedAt: Date, now: Date): number {
   return Math.max(0, (now.getTime() - publishedAt.getTime()) / 3_600_000);
@@ -52,6 +58,16 @@ function ageHours(publishedAt: Date, now: Date): number {
 function recencyScore(item: RecommendationItem, now: Date): number {
   const decay = Math.LN2 / RECENCY_HALF_LIFE_HOURS;
   return Math.exp(-decay * ageHours(item.publishedAt, now));
+}
+
+/**
+ * 0 for a post from the last two months, rising toward 1 after that (half of it 30 days past the cutoff). Large
+ * enough at full weight that a year-old post sits behind the recent ones even when feed spread or topic balance
+ * favor it, without dropping it from the list.
+ */
+function staleness(item: RecommendationItem, now: Date): number {
+  const daysPast = ageHours(item.publishedAt, now) / 24 - STALE_AFTER_DAYS;
+  return daysPast <= 0 ? 0 : 1 - Math.exp(-(Math.LN2 / STALE_HALF_LIFE_DAYS) * daysPast);
 }
 
 function popularityScore(item: RecommendationItem, now: Date): number {
@@ -84,19 +100,6 @@ function topicAffinityByTopic(
   return affinity;
 }
 
-function feedVelocityByFeed<T extends RecommendationItem>(items: T[]): Record<string, number> {
-  const feedCounts = new Map<string, number>();
-  for (const item of items) {
-    feedCounts.set(item.feedId, (feedCounts.get(item.feedId) ?? 0) + 1);
-  }
-  const maxCount = Math.max(...feedCounts.values(), 1);
-  const velocity: Record<string, number> = {};
-  for (const [feedId, count] of feedCounts.entries()) {
-    velocity[feedId] = count / maxCount;
-  }
-  return velocity;
-}
-
 function compareItems(a: RecommendationItem, b: RecommendationItem): number {
   const aRank = a.sourceRank ?? Number.MAX_SAFE_INTEGER;
   const bRank = b.sourceRank ?? Number.MAX_SAFE_INTEGER;
@@ -108,38 +111,33 @@ function compareItems(a: RecommendationItem, b: RecommendationItem): number {
   return a.id.localeCompare(b.id);
 }
 
-function applySoftTopicBalance<T extends RecommendationItem>(
+/**
+ * Greedy, one position at a time: the best adjusted score wins. A feed loses `feedRepeatPenalty` for each item it
+ * already has above, so the front of the list cycles through sources before any repeats. With topic balance on, a
+ * topic also loses `strength × (projected share − target share)` once it is over its target. The target leans to an
+ * equal share per topic (`targetBlend` of the observed share), so a topic with few feeds still gets front slots.
+ */
+function diversify<T extends RecommendationItem>(
   scored: ScoredItem<T>[],
-  strength: number,
-  targetBlend: number,
+  feedRepeatPenalty: number,
+  topicBalance: { strength: number; targetBlend: number } | null,
 ): T[] {
-  if (scored.length <= 2) {
-    return scored
-      .slice()
-      .sort((a, b) => (b.baseScore - a.baseScore) || compareItems(a.item, b.item))
-      .map((entry) => entry.item);
-  }
-
-  const total = scored.length;
-  const allTopics = scored.map((entry) => entry.item.feed.topic);
-  const uniqueTopics = [...new Set(allTopics)];
+  const topics = scored.map((entry) => entry.item.feed.topic);
+  const uniqueTopics = [...new Set(topics)];
   const uniform = 1 / uniqueTopics.length;
 
-  const observedByTopic: Record<string, number> = {};
-  for (const topic of allTopics) {
-    observedByTopic[topic] = (observedByTopic[topic] ?? 0) + 1;
-  }
-  for (const topic of uniqueTopics) {
-    observedByTopic[topic] = observedByTopic[topic] / total;
-  }
-
   const targetShareByTopic: Record<string, number> = {};
-  for (const topic of uniqueTopics) {
-    const observed = observedByTopic[topic] ?? 0;
-    targetShareByTopic[topic] = (targetBlend * observed) + ((1 - targetBlend) * uniform);
+  if (topicBalance) {
+    const observedCounts: Record<string, number> = {};
+    for (const topic of topics) observedCounts[topic] = (observedCounts[topic] ?? 0) + 1;
+    for (const topic of uniqueTopics) {
+      const observed = observedCounts[topic] / scored.length;
+      targetShareByTopic[topic] = (topicBalance.targetBlend * observed) + ((1 - topicBalance.targetBlend) * uniform);
+    }
   }
 
-  const selectedCounts: Record<string, number> = {};
+  const pickedByFeed: Record<string, number> = {};
+  const pickedByTopic: Record<string, number> = {};
   const remaining = [...scored];
   const ranked: T[] = [];
 
@@ -149,30 +147,23 @@ function applySoftTopicBalance<T extends RecommendationItem>(
     let bestScore = Number.NEGATIVE_INFINITY;
 
     for (let i = 0; i < remaining.length; i += 1) {
-      const candidate = remaining[i];
-      const topic = candidate.item.feed.topic;
-      const projectedCount = (selectedCounts[topic] ?? 0) + 1;
-      const projectedShare = projectedCount / nextPosition;
-      const target = targetShareByTopic[topic] ?? uniform;
-      const penalty = strength * Math.max(0, projectedShare - target);
-      const adjusted = candidate.baseScore - penalty;
+      const { item, baseScore } = remaining[i];
+      let adjusted = baseScore - (feedRepeatPenalty * (pickedByFeed[item.feedId] ?? 0));
+      if (topicBalance) {
+        const projectedShare = ((pickedByTopic[item.feed.topic] ?? 0) + 1) / nextPosition;
+        const target = targetShareByTopic[item.feed.topic] ?? uniform;
+        adjusted -= topicBalance.strength * Math.max(0, projectedShare - target);
+      }
 
-      if (adjusted > bestScore) {
+      if (adjusted > bestScore || (adjusted === bestScore && compareItems(item, remaining[bestIndex].item) < 0)) {
         bestScore = adjusted;
         bestIndex = i;
-        continue;
-      }
-      if (adjusted === bestScore) {
-        const currentBest = remaining[bestIndex];
-        if (compareItems(candidate.item, currentBest.item) < 0) {
-          bestIndex = i;
-        }
       }
     }
 
     const [picked] = remaining.splice(bestIndex, 1);
-    const pickedTopic = picked.item.feed.topic;
-    selectedCounts[pickedTopic] = (selectedCounts[pickedTopic] ?? 0) + 1;
+    pickedByFeed[picked.item.feedId] = (pickedByFeed[picked.item.feedId] ?? 0) + 1;
+    pickedByTopic[picked.item.feed.topic] = (pickedByTopic[picked.item.feed.topic] ?? 0) + 1;
     ranked.push(picked.item);
   }
 
@@ -188,35 +179,28 @@ export function recommendItems<T extends RecommendationItem>(
   const now = options.now ?? new Date();
   const weights = { ...DEFAULT_WEIGHTS, ...options.weights };
   const topicCounts = options.topicCounts ?? {};
-  const softBalanceStrength = options.softBalanceStrength ?? DEFAULT_BALANCE_STRENGTH;
-  const targetBlend = options.targetBlend ?? DEFAULT_TARGET_BLEND;
   const applyTopicBalance = options.applyTopicBalance ?? true;
+  const stalePenalty = options.stalePenalty ?? DEFAULT_STALE_PENALTY;
 
-  const topics = items.map((item) => item.feed.topic);
-  const topicAffinity = topicAffinityByTopic(topicCounts, topics);
-  const velocityByFeed = feedVelocityByFeed(items);
+  const topicAffinity = topicAffinityByTopic(topicCounts, items.map((item) => item.feed.topic));
 
-  const scored = items.map((item) => {
-    const popularity = popularityScore(item, now);
-    const recency = recencyScore(item, now);
-    const affinity = topicAffinity[item.feed.topic] ?? DEFAULT_TOPIC_AFFINITY;
-    const velocity = velocityByFeed[item.feedId] ?? 0;
+  const scored = items.map((item) => ({
+    item,
+    baseScore:
+      (weights.popularity * popularityScore(item, now))
+      + (weights.recency * recencyScore(item, now))
+      + (weights.topicAffinity * (topicAffinity[item.feed.topic] ?? DEFAULT_TOPIC_AFFINITY))
+      - (stalePenalty * staleness(item, now)),
+  }));
 
-    return {
-      item,
-      baseScore:
-        (weights.popularity * popularity)
-        + (weights.recency * recency)
-        + (weights.topicAffinity * affinity)
-        + (weights.feedVelocity * velocity),
-    };
-  });
-
-  if (!applyTopicBalance) {
-    return scored
-      .sort((a, b) => (b.baseScore - a.baseScore) || compareItems(a.item, b.item))
-      .map((entry) => entry.item);
-  }
-
-  return applySoftTopicBalance(scored, softBalanceStrength, targetBlend);
+  return diversify(
+    scored,
+    options.feedRepeatPenalty ?? DEFAULT_FEED_REPEAT_PENALTY,
+    applyTopicBalance
+      ? {
+        strength: options.softBalanceStrength ?? DEFAULT_BALANCE_STRENGTH,
+        targetBlend: options.targetBlend ?? DEFAULT_TARGET_BLEND,
+      }
+      : null,
+  );
 }

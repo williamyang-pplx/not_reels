@@ -40,6 +40,20 @@ function loading(on: boolean) {
   }
 }
 
+// ---------- version skew ----------
+
+// The service worker can start the app from a page cached before a deploy. Fresh markup from the new server may
+// need code or CSS that page lacks (a button it has no handler for), so a response from another build drops the
+// cached pages and reloads from the network instead. At most once per build, so it can never loop.
+const build = document.documentElement.dataset.build;
+function reloadIfStale(res: Response): boolean {
+  const next = res.headers.get('X-Build');
+  if (!next || next === build || sessionStorage.getItem('nr-reloaded') === next) return false;
+  sessionStorage.setItem('nr-reloaded', next);
+  void ('caches' in window ? caches.delete('pages-v1') : Promise.resolve()).finally(() => location.reload());
+  return true;
+}
+
 // ---------- view cache ----------
 
 function kindOf(path: string): Kind {
@@ -62,6 +76,7 @@ function load(key: string, force = false): Promise<string> {
   entry.p = fetch(key, { headers: { 'X-Partial': '1' } })
     .then((r) => {
       if (!r.ok) throw new Error(String(r.status));
+      if (reloadIfStale(r)) return new Promise<string>(() => {}); // the page is going away
       return r.text();
     })
     .then(
@@ -246,6 +261,7 @@ async function loadMore(sentinel: HTMLElement) {
   try {
     const res = await fetch(`/_f/items?${sentinel.dataset.q}&cursor=${encodeURIComponent(sentinel.dataset.cursor!)}`);
     if (!res.ok) throw new Error();
+    if (reloadIfStale(res)) return;
     const html = await res.text();
     more.remove();
     sentinel.insertAdjacentHTML('afterend', html);
@@ -350,6 +366,52 @@ function playYouTube(btn: HTMLElement) {
   iframe.allowFullscreen = true;
   iframe.className = 'absolute inset-0 w-full h-full border-0';
   btn.replaceWith(iframe);
+}
+
+// A card carries a summary excerpt. "More" fetches the whole text once (kept per item) and shows it in place of the
+// excerpt; "Less" puts the excerpt back and scrolls the card's top into view if it went under the nav.
+const fullSummaries = new Map<string, string>();
+
+async function toggleSummary(btn: HTMLButtonElement, card: HTMLElement) {
+  const [excerpt, full] = $$('.sum', card);
+  if (btn.getAttribute('aria-expanded') === 'true') {
+    excerpt.hidden = false;
+    full.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+    btn.textContent = 'More';
+    const navBottom = $('[data-testid="nav-bar"]')?.getBoundingClientRect().bottom ?? 0;
+    const top = card.getBoundingClientRect().top;
+    if (top < navBottom) window.scrollBy(0, top - navBottom - 8);
+    return;
+  }
+  if (!full) {
+    const id = btn.dataset.id!;
+    btn.disabled = true;
+    btn.textContent = 'Loading…';
+    try {
+      let text = fullSummaries.get(id);
+      if (text === undefined) {
+        const res = await fetch(`/_f/summary/${encodeURIComponent(id)}`);
+        if (!res.ok) throw new Error(String(res.status));
+        text = await res.text();
+        fullSummaries.set(id, text);
+      }
+      const p = document.createElement('p');
+      p.className = 'sum';
+      p.textContent = text;
+      excerpt.after(p);
+    } catch {
+      btn.textContent = 'Retry';
+      return;
+    } finally {
+      btn.disabled = false;
+    }
+  } else {
+    full.hidden = false;
+  }
+  excerpt.hidden = true;
+  btn.setAttribute('aria-expanded', 'true');
+  btn.textContent = 'Less';
 }
 
 async function refreshAll(btn: HTMLButtonElement) {
@@ -584,6 +646,8 @@ document.addEventListener('click', (e) => {
       return;
     case 'yt':
       return playYouTube(btn);
+    case 'more':
+      return void toggleSummary(btn, card!);
     case 'refresh':
       return void refreshAll(btn);
     case 'delete-saved': {

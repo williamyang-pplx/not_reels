@@ -3,7 +3,7 @@ import { RYM_FEED_URL } from '../lib/constants';
 import { detectEmbedKind, extractRedditPost, extractYouTubeId } from '../lib/embed';
 import type { FeedItemDTO, SavedLinkDTO } from '../lib/queries';
 import type { TopicRecord } from '../lib/types';
-import { decodeEntities, formatRelativeTime, topicColor } from '../lib/utils';
+import { decodeEntities, formatRelativeTime, reflowText, topicColor } from '../lib/utils';
 
 export function EmptyState({ message }: { message: string }) {
   return (
@@ -87,9 +87,16 @@ function safeHref(url: string): string | undefined {
   return /^https?:\/\//i.test(url) ? url : undefined;
 }
 
-function truncateSummary(summary: string): string {
-  const words = summary.split(/\s+/);
-  return `${words.slice(0, 20).join(' ')}${words.length > 20 ? '…' : ''}`;
+/**
+ * Summaries can be whole articles (some are hundreds of KB), so a card carries only an excerpt. A cut one gets a
+ * "More" button, which fetches the whole text from /_f/summary/:id.
+ */
+const SUMMARY_WORDS = 60;
+
+function summaryExcerpt(summary: string): { text: string; cut: boolean } {
+  const words = summary.trim().split(/\s+/);
+  if (words.length <= SUMMARY_WORDS) return { text: reflowText(summary), cut: false };
+  return { text: `${words.slice(0, SUMMARY_WORDS).join(' ')}…`, cut: true };
 }
 
 function parseRymMusicRec(item: FeedItemDTO) {
@@ -163,6 +170,7 @@ export function FeedCard({ item: raw, now }: { item: FeedItemDTO; now: Date }) {
   const reddit = kind === 'reddit' ? extractRedditPost(item.link) : null;
   const rym = isRym ? parseRymMusicRec(item) : null;
   const shownTitle = rym ? rym.albumTitle : item.title;
+  const summary = !rym && item.summary ? summaryExcerpt(item.summary) : null;
 
   // Markup is kept terse (short classes from styles.css, no duplicated data) because a page
   // carries up to 100 of these. The client reads the link from the first <a href> and the
@@ -192,9 +200,14 @@ export function FeedCard({ item: raw, now }: { item: FeedItemDTO; now: Date }) {
             </div>
           </>
         ) : (
-          item.summary && <p class="sum">{truncateSummary(item.summary)}</p>
+          summary && <p class="sum">{summary.text}</p>
         )}
       </a>
+      {summary?.cut && (
+        <button data-act="more" data-id={item.id} aria-expanded="false" class="more">
+          More
+        </button>
+      )}
       {youTubeId && <YouTubeFacade id={youTubeId} title={item.title} />}
       {reddit && <RedditEmbed {...reddit} title={item.title} />}
       <div class="badges">

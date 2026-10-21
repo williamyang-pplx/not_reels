@@ -55,6 +55,31 @@ describe('GET /api/feed-items', () => {
     expect(body.data.nextCursor).toBeNull();
   });
 
+  it('builds the recommended pool round-robin over feeds, so a busy feed cannot crowd out a quiet one', async () => {
+    const busy = createFeed({ name: 'Busy', topic: 'TECHNOLOGY' });
+    const quiet = createFeed({ name: 'Quiet', topic: 'TECHNOLOGY', url: 'https://example.com/quiet.xml' });
+    // More rank-0 items than the 200-item pool, all newer than the quiet feed's one post.
+    for (let i = 0; i < 250; i++) {
+      insertItem(busy.id, {
+        guid: `busy-${i}`,
+        title: `Busy ${i}`,
+        link: `https://example.com/busy/${i}`,
+        publishedAt: new Date(Date.UTC(2026, 3, 17) - i * 60_000),
+        sourceRank: 0,
+      });
+    }
+    insertItem(quiet.id, {
+      guid: 'quiet-0',
+      title: 'Quiet',
+      link: 'https://example.com/quiet/0',
+      publishedAt: new Date('2026-03-01T00:00:00Z'),
+      sourceRank: 0,
+    });
+
+    const body = await (await GET('?sort=recommended')).json();
+    expect(body.data.items.map((i: { guid: string }) => i.guid).slice(0, 2)).toEqual(['busy-0', 'quiet-0']);
+  });
+
   it('returns a shuffled permutation of the window in random mode', async () => {
     const feed = createFeed();
     seedItems(feed.id, 10);

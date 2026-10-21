@@ -46,7 +46,10 @@ button { -webkit-user-select: none; user-select: none; }
   .sc .meta { @apply mb-2; }
   .card h3 { @apply font-bold leading-snug text-foreground; font-size: 17px; }
   .sc .cl:active h3 { @apply underline; }
-  .sum { @apply mt-1 text-sm text-muted-foreground leading-snug line-clamp-2; }
+  .sum { @apply mt-1 text-sm text-muted-foreground leading-snug whitespace-pre-line; }
+  .more { @apply text-xs text-primary py-2 -mb-1; }
+  .more:active { opacity: .6; }
+  .more:disabled { @apply opacity-50; }
   .artist { @apply mt-0.5 text-sm text-muted-foreground leading-snug; }
   .rym { @apply mt-2.5 space-y-0.5 text-sm leading-snug; }
   .rym .m { @apply text-muted-foreground; }

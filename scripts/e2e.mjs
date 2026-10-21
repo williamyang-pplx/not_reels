@@ -21,6 +21,9 @@ execFileSync('sqlite3', [db, `INSERT OR IGNORE INTO Topic (slug,label) VALUES ('
 execFileSync('sqlite3', [db, `INSERT INTO Feed (id,name,url,sourceKind,isActive,fetchErrorCount,createdAt,updatedAt) VALUES ('e2e-feed','Synthetic','https://example.invalid/feed.xml','RSS',1,0,${now},${now});
 INSERT INTO FeedTopic VALUES ('e2e-feed','TECHNOLOGY');
 INSERT INTO FeedItem (id,feedId,guid,title,link,publishedAt,sourceRank,fetchedAt) VALUES ${rows.join(',')};`]);
+// An item a minute in the future, so it is first under New whatever the DB holds, with a summary past the card's excerpt.
+const LONG = Array.from({ length: 150 }, (_, i) => `word${i}`).join(' ');
+execFileSync('sqlite3', [db, `INSERT INTO FeedItem (id,feedId,guid,title,link,summary,publishedAt,sourceRank,fetchedAt) VALUES ('e2e-long','e2e-feed','glong','Synthetic long summary','https://example.com/e2e/long','${LONG}',${now + 60_000},0,${now});`]);
 const server = spawn('node', ['dist/server.mjs'], { env: { ...process.env, DATABASE_URL: `file:${db}`, PORT: '3300' }, stdio: 'inherit' });
 await new Promise((r) => setTimeout(r, 500));
 const base = 'http://localhost:3300';
@@ -99,6 +102,19 @@ try {
     await page.waitForFunction((n) => document.querySelectorAll('[data-testid=feed-card]').length > n, n);
     ok('infinite scroll loads the next page');
   } else throw new Error('expected a second page in New mode');
+
+  // A cut summary: More shows the whole text in the card, Less puts the excerpt back.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const longCard = page.locator('[data-testid=feed-card]', { hasText: 'Synthetic long summary' });
+  const shownSum = longCard.locator('.sum:visible');
+  assert.match(await shownSum.textContent(), /word59…$/);
+  await longCard.locator('[data-act=more]').click();
+  await page.waitForFunction(() => document.querySelector('[data-act=more]')?.getAttribute('aria-expanded') === 'true');
+  assert.match(await shownSum.textContent(), /word149$/);
+  await longCard.locator('[data-act=more]').click();
+  assert.match(await shownSum.textContent(), /word59…$/);
+  assert.equal(await longCard.locator('[data-act=more]').textContent(), 'More');
+  ok('More expands a cut summary in place, Less collapses it');
 
   await page.click('[data-testid=nav-manage-link]');
   await page.waitForSelector('[data-testid=topics-manager]');

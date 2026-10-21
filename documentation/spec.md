@@ -212,7 +212,7 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
   - The feed has topic `topic` if `topic` is given and is not `ALL` (validated).
 - **Exclusion:** load all `SavedLink.url` and `HiddenLink.url`. Add `link NOT IN (...)` **to the DB query**. Do not filter these out in memory.
 - **`recommended` (shown as "Hot"):**
-  1. Fetch up to 200 items ordered by `sourceRank asc, publishedAt desc`.
+  1. Fetch up to 200 items **round-robin over feeds**: number each feed's items by `sourceRank asc, publishedAt desc` (`ROW_NUMBER() OVER (PARTITION BY feedId …)`), then order by that number, then `sourceRank asc, publishedAt desc`. Every feed's best item is in the pool before any feed's second, so a busy feed can't crowd out a quiet one.
   2. Give each item a "primary topic": the first entry of its feed's topics. In practice that is the lowest slug alphabetically, because the join rows come back in PK order.
   3. Run the recommender (§6). Pass `topicCounts` (the number of SavedLinks per topic). Set `applyTopicBalance = true` only when no topic filter is set or the filter is `ALL`.
   4. Slice to `limit`. `nextCursor` is always `null`.
@@ -326,22 +326,21 @@ Make the fetcher, the local provider registry and the concurrency injectable thr
 This is a pure function, `recommendItems(items, opts)`. Each item has `{id, feedId, publishedAt, sourceRank?, feed: {name, topic}}`.
 
 - If there are 1 or fewer items, return them as they are.
-- **Weights** (overridable): popularity 0.6, recency 0.15, topicAffinity 0.15, feedVelocity 0.1.
+- **Weights** (overridable): popularity 0.6, recency 0.15, topicAffinity 0.15. (There is no feed-volume term: a feed that posts more must not rank higher for it.)
 - **recency:** `exp(-ln2/halfLife × ageHours)`. `halfLife` is 36h for every feed. `ageHours` is floored at 0.
 - **popularity:** if `sourceRank` is a finite number ≥ 0, use `exp(-ln2/4 × sourceRank)`. Otherwise fall back to recency.
 - **topicAffinity:** uses `topicCounts`, the number of saved links per topic.
   - If the total is 0, every topic gets 0.5.
   - Otherwise use the Laplace-smoothed share `(count+1)/(total + #uniqueTopicsInItems)`.
-- **feedVelocity:** the number of candidate items from this feed divided by the largest per-feed count.
-- **baseScore:** the weighted sum of the four scores.
+- **staleness:** 0 for a post from the last 60 days. After that, `1 − exp(−ln2/30 × (ageDays − 60))`, so it is 0.5 at 90 days and nears 1 by about 6 months.
+- **baseScore:** the weighted sum of the three scores, minus `0.5 × staleness`. The penalty is larger than anything feed spread or topic balance can make up, so a post older than two months sits behind the recent ones but stays in the list.
 - **Tie-break (`compareItems`):** `sourceRank asc` (null counts as +∞), then `publishedAt desc`, then `id` ascending.
-- **If `applyTopicBalance` is false:** sort by baseScore desc, then use the tie-break.
-- **Soft topic balance** (the default). Strength `0.25`, targetBlend `0.7`. If there are 2 or fewer items, just sort.
-  - `observed[t]` is topic t's share of the candidates. `uniform` is `1/#topics`.
-  - `target[t] = 0.7×observed[t] + 0.3×uniform`.
-  - Greedy selection, one position at a time. For each remaining candidate:
-    - `projectedShare = (selectedCount[t]+1)/position`
-    - `adjusted = baseScore − 0.25×max(0, projectedShare − target[t])`
+- **Diversified order.** Greedy selection, one position at a time. For each remaining candidate:
+  - **Feed spread** (always on): `adjusted = baseScore − 0.2 × (items already placed from this feed)`. The front of the list cycles through sources before any feed repeats.
+  - **Topic balance** (only if `applyTopicBalance`, i.e. no topic filter): strength `1`, targetBlend `0.3`.
+    - `observed[t]` is topic t's share of the candidates. `uniform` is `1/#topics`.
+    - `target[t] = 0.3×observed[t] + 0.7×uniform`, so a topic with few feeds still gets close to an equal share of the front.
+    - `projectedShare = (selectedCount[t]+1)/position`. Subtract `1 × max(0, projectedShare − target[t])`.
   - Pick the highest `adjusted`. Ties go to the earlier item under `compareItems`.
 
 ## 7. Embeds and URL helpers
@@ -412,7 +411,7 @@ All pages are `force-dynamic`. The root layout wraps the page in the React Query
 - **Link area:** the whole top section is an `<a target=_blank rel="noopener noreferrer">` to `item.link`. It contains:
   - Header row: the feed name (truncated, or `Unknown`) and the relative time.
   - The title.
-  - The summary, cut to its **first 20 words** with `…` and also `line-clamp-2`.
+  - The summary. A short one (60 words or fewer) is shown whole, with hard line wraps joined into paragraphs. A longer one shows its **first 60 words** with `…`, and a **More** button below the link area loads the whole text from `GET /_f/summary/:id` (plain text, reflowed into paragraphs) and shows it in place of the excerpt. The button then reads **Less**, which puts the excerpt back and scrolls the card top into view if it is under the nav. The text is fetched once per item. A failed load leaves the excerpt and sets the label to **Retry**.
 - **Embeds** below the link area:
   - **YouTube:** a lite-youtube embed in an `aspect-video` box with `params="rel=0"` and the play label `Play: <title>`.
   - **Reddit:** an iframe of `https://www.redditmedia.com/r/<sub>/comments/<id>/<slug>/?ref_source=embed&ref=share&embed=true`, 500px tall, lazy-loaded. Its sandbox is `allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox`.
@@ -563,7 +562,7 @@ Write Vitest suites with the same coverage as these existing files:
 - `embed`: YouTube and Reddit detection and ID extraction edge cases.
 - `archive`: `cleanUrl` removes the query and fragment and keeps the path.
 - `rss-fetcher`: the normalization fallbacks and guid hashing.
-- `recommendation`: the scoring order, the topic-balance effect, and the deterministic tie-breaks.
+- `recommendation`: the scoring order, the feed spread (every feed once before a repeat), the topic-balance effect (a small, slow topic gets a front slot), and the deterministic tie-breaks.
 - `feed-refresh`:
   - Inserts and dedupes.
   - Overwrites on update.

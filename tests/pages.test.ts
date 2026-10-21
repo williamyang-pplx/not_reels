@@ -97,6 +97,13 @@ describe('GET /', () => {
     expect(body).toContain('data-testid="feed-list"');
   });
 
+  it('stamps the document and partials with the build id, so a stale page can tell', async () => {
+    const full = await html('/');
+    expect(full.body).toContain('<html lang="en" data-build="dev">');
+    const partial = await request('/', { headers: { 'X-Partial': '1' } });
+    expect(partial.headers.get('X-Build')).toBe('dev');
+  });
+
   it('renders the RYM card variant with a YouTube Music link and no archive button', async () => {
     const feed = createFeed({ name: 'RYM', url: 'local/rym_music_recs', sourceKind: 'LOCAL', topic: 'MUSIC' });
     const { getDb, cuid } = await import('../src/db');
@@ -161,6 +168,41 @@ describe('GET /saved and /manage', () => {
   it('shows the manage empty state', async () => {
     const { body } = await html('/manage');
     expect(body).toContain('No feeds yet. Add your first one above.');
+  });
+});
+
+describe('summaries', () => {
+  const long = Array.from({ length: 120 }, (_, i) => `w${i}`).join(' ') + '\n\nLast &amp; paragraph.';
+  const seedSummaries = async () => {
+    const feed = createFeed();
+    seedItems(feed.id, 2);
+    const { getDb } = await import('../src/db');
+    const ids = getDb().prepare('SELECT "id" FROM "FeedItem" WHERE "feedId" = ? ORDER BY "publishedAt" DESC').all(feed.id) as { id: string }[];
+    getDb().prepare('UPDATE "FeedItem" SET "summary" = ? WHERE "id" = ?').run(long, ids[0].id);
+    getDb().prepare('UPDATE "FeedItem" SET "summary" = ? WHERE "id" = ?').run('Short one.', ids[1].id);
+    return ids.map((r) => r.id);
+  };
+
+  it('cards carry a 60-word excerpt, and a cut one gets a More button with the item id', async () => {
+    const [longId] = await seedSummaries();
+    const { body } = await html('/?sort=new');
+    expect(body).toContain('<p class="sum">w0 w1');
+    expect(body).toContain('w59…</p>');
+    expect(body).not.toContain('w60');
+    expect(body).toContain(`<button data-act="more" data-id="${longId}" aria-expanded="false" class="more">More</button>`);
+    expect(body).toContain('<p class="sum">Short one.</p>');
+    expect(body.match(/data-act="more"/g)).toHaveLength(1);
+  });
+
+  it('GET /_f/summary/:id returns the whole summary as plain text, entities decoded', async () => {
+    const [longId] = await seedSummaries();
+    const res = await request(`/_f/summary/${longId}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('text/plain');
+    const text = await res.text();
+    expect(text.split(/\s+/)).toHaveLength(123);
+    expect(text.endsWith('\n\nLast & paragraph.')).toBe(true);
+    expect((await request('/_f/summary/nope')).status).toBe(404);
   });
 });
 
