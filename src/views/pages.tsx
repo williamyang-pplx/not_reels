@@ -46,7 +46,7 @@ export function Document({ children }: { children: Child }) {
           <meta name="apple-mobile-web-app-capable" content="yes" />
           <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
           <meta name="apple-mobile-web-app-title" content="not-brainrot" />
-          <link rel="apple-touch-icon" href="/icons/galaxy.png" />
+          <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
           <link rel="icon" href="/favicon.ico" sizes="any" />
           <link rel="preload" href="/fonts/rambla-400.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
           <link rel="preload" href="/fonts/rambla-700.woff2" as="font" type="font/woff2" crossorigin="anonymous" />

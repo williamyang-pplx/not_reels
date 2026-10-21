@@ -21,7 +21,7 @@ const sw = self as unknown as {
 const PAGES = 'pages-v1';
 const ASSETS = 'assets-v1';
 const PAGE_PATHS = new Set(['/', '/saved', '/manage']);
-const PRECACHE = [__APP_JS__, '/fonts/rambla-400.woff2', '/fonts/rambla-700.woff2', '/manifest.json', '/icons/galaxy.png'];
+const PRECACHE = [__APP_JS__, '/fonts/rambla-400.woff2', '/fonts/rambla-700.woff2', '/manifest.json', '/icons/apple-touch-icon.png'];
 
 sw.addEventListener('install', (event) => {
   event.waitUntil(

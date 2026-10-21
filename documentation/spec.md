@@ -60,7 +60,7 @@ Do **not** assume that you must keep the current stack (§2.2). Before you write
 ### Assets to carry over unchanged (you cannot regenerate them)
 - `data/rym_data.db`: the SQLite album DB (about 3,900 albums). It must stay tracked in git: `.gitignore` ignores `*.db` but has `!data/rym_data.db`.
 - `data/rym_music_prefs.json`: genre and decade weights.
-- `public/youtube_music_icon.png`, `public/icons/galaxy.png`, `public/icons/icon-192.png`, `public/icons/icon-512.png`, `app/icon.png`, `app/favicon.ico`.
+- `public/youtube_music_icon.png`, `public/icons/apple-touch-icon.png` (180×180, Michael Cera, cropped from the_kitchen's icon), `public/icons/icon-192.png`, `public/icons/icon-512.png`, `app/icon.png`, `app/favicon.ico`.
 
 ## 3. Data model (Prisma, SQLite)
 
@@ -512,7 +512,7 @@ Global CSS:
 
 ### 9.2 PWA and metadata
 - **Metadata:** title `not-reels`, description `Personal RSS feed compiler`, `manifest: /manifest.json`.
-- **appleWebApp:** `capable: true`, `statusBarStyle: 'black-translucent'`, title `not-reels`. The apple icon is `/icons/galaxy.png`.
+- **appleWebApp:** `capable: true`, `statusBarStyle: 'black-translucent'`, title `not-reels`. The apple icon is `/icons/apple-touch-icon.png`.
 - **Viewport:** `themeColor #0a0a0a`, `width=device-width`, `initialScale 1`, `viewportFit cover`.
 - **`public/manifest.json`:** name and short_name `not-reels`, `start_url /`, `display standalone`, background and theme color `#0a0a0a`, `orientation portrait`. Icons: 192, 512, and 512 maskable.
 

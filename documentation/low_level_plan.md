@@ -34,7 +34,7 @@ src/
   pages.tsx                 # Hono router: /, /saved, /manage (+ partial mode), /_f/items, /_f/summary/:id
 client/app.ts               # all browser JS
 src/styles.css              # tailwind input
-public/  manifest.json youtube_music_icon.png icons/{galaxy,icon-192,icon-512}.png
+public/  manifest.json youtube_music_icon.png icons/{apple-touch-icon,icon-192,icon-512}.png
          favicon.ico icon.png fonts/rambla-{400,700,400i,700i}.woff2
 data/  rym_data.db rym_music_prefs.json        # copied unchanged
 tests/ *.test.ts setup.ts helpers.ts
