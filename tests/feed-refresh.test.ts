@@ -90,7 +90,7 @@ describe('refreshSingleFeed', () => {
     expect(itemsOf(feed.id).map((i) => i.guid)).toEqual(items.slice(0, MAX_ITEMS_PER_FEED).map((i) => i.guid));
   });
 
-  it('prunes the RYM feed to 30 items instead of 15', async () => {
+  it('prunes the RYM feed to one batch of 30 albums', async () => {
     const feed = createFeed({ url: 'local/rym_music_recs', sourceKind: 'LOCAL', topic: 'MUSIC' });
     const r = await refreshSingleFeed(feed.id, {
       localProviders: {

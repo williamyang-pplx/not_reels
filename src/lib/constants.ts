@@ -19,7 +19,7 @@ export const PAGE_SIZE_DEFAULT = 100;
 export const PAGE_SIZE_MAX = 100;
 export const RELEVANT_FETCH_SIZE = 200;
 
-export const MAX_ITEMS_PER_FEED = 15;
+export const MAX_ITEMS_PER_FEED = 30;
 
 export const FETCH_ERROR_THRESHOLD = 5;
 export const FETCH_CONCURRENCY = 12;

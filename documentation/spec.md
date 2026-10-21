@@ -139,7 +139,7 @@ model HiddenLink {
 | `DEFAULT_TOPICS` | NEWS/News, MUSIC/Music, LITERATURE/Literature, TECHNOLOGY/Tech, SCIENCE/Science, CULTURE/Culture, POLITICS/Politics, OTHER/Other (in this order) |
 | `PAGE_SIZE_DEFAULT` / `PAGE_SIZE_MAX` | 100 / 100 |
 | `RELEVANT_FETCH_SIZE` | 200 (candidate pool for Hot and Random) |
-| `MAX_ITEMS_PER_FEED` | 15 |
+| `MAX_ITEMS_PER_FEED` | 30 |
 | `FETCH_ERROR_THRESHOLD` | 5 |
 | `FETCH_CONCURRENCY` | 12 |
 
@@ -255,7 +255,7 @@ Make the fetcher, the local provider registry and the concurrency injectable thr
    - For each item, upsert on `(feedId, guid)`. On create, set all fields. On update, overwrite title, link, summary, author, publishedAt and sourceRank. Count only the rows that are actually new.
    - Then set `sourceRank = 10000` on every item in this feed whose guid was **not** in this fetch. These are "stale" items.
 4. Set `lastFetched = now` and `fetchErrorCount = 0`.
-5. **Prune:** keep the top N items ordered by `sourceRank asc, publishedAt desc` and delete the rest. N is **30** for the feed with URL `local/rym_music_recs` and **15** for all other feeds.
+5. **Prune:** keep the top N items ordered by `sourceRank asc, publishedAt desc` and delete the rest. N is **30** for every feed (`MAX_ITEMS_PER_FEED`; for `local/rym_music_recs` it is `RYM_ITEMS_PER_REFRESH`, one batch, also 30).
 6. Return `{newItems, ok:true}`.
 7. **If any step throws:** increment `fetchErrorCount`. If it reaches 5 or more, set `isActive=false`. Log `[feed-refresh] failed feed=<id> url=<url>:` and the error. Return `{newItems:0, ok:false}`.
 
@@ -567,7 +567,7 @@ Write Vitest suites with the same coverage as these existing files:
   - Inserts and dedupes.
   - Overwrites on update.
   - Marks stale items with rank 10000.
-  - Prunes to 15, and to 30 for RYM.
+  - Prunes to 30, and RYM to one batch of 30.
   - Increments the error count and deactivates the feed at 5.
   - Resets the error count on success.
   - Skips inactive feeds.
