@@ -230,6 +230,8 @@ export function SavedPage({ links, topics }: { links: SavedLinkDTO[]; topics: To
   );
 }
 
+const moveBtnClass = 'w-6 h-6 rounded-full text-muted-foreground active:bg-accent disabled:opacity-30 text-base leading-none';
+
 export function ManagePage({ topics, feeds }: { topics: TopicRecord[]; feeds: FeedDTO[] }) {
   return (
     <div class="pt-3 flex flex-col gap-3" data-view="manage">
@@ -259,12 +261,35 @@ export function ManagePage({ topics, feeds }: { topics: TopicRecord[]; feeds: Fe
           <p class="text-xs text-muted-foreground">No topics yet.</p>
         ) : (
           <ul class="flex flex-wrap gap-2">
-            {topics.map((t) => (
+            {topics.map((t, i) => (
               <li
                 data-testid="topic-chip"
-                class="inline-flex items-center gap-1 h-8 pl-3 pr-1 rounded-full border border-border bg-background text-xs"
+                data-slug={t.slug}
+                class="inline-flex items-center gap-1 h-8 px-1 rounded-full border border-border bg-background text-xs"
               >
+                <button
+                  type="button"
+                  data-act="move-topic"
+                  data-dir="-1"
+                  disabled={i === 0}
+                  aria-label={`Move ${t.label} left`}
+                  data-testid={`move-topic-left-${t.slug}`}
+                  class={moveBtnClass}
+                >
+                  ‹
+                </button>
                 <span>{t.label}</span>
+                <button
+                  type="button"
+                  data-act="move-topic"
+                  data-dir="1"
+                  disabled={i === topics.length - 1}
+                  aria-label={`Move ${t.label} right`}
+                  data-testid={`move-topic-right-${t.slug}`}
+                  class={moveBtnClass}
+                >
+                  ›
+                </button>
                 <button
                   type="button"
                   data-act="delete-topic"

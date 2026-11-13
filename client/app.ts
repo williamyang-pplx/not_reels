@@ -505,6 +505,53 @@ async function deleteTopic(btn: HTMLButtonElement) {
   }
 }
 
+/** ‹/› on a Manage topic chip: move it one step at once, fix the end buttons, then save the order. */
+function moveTopic(btn: HTMLButtonElement) {
+  const chip = btn.closest('li')!;
+  const left = btn.dataset.dir === '-1';
+  const sibling = left ? chip.previousElementSibling : chip.nextElementSibling;
+  if (!sibling) return;
+  if (left) sibling.before(chip);
+  else sibling.after(chip);
+  const chips = $$('li[data-slug]', chip.parentElement!);
+  chips.forEach((c, i) => {
+    $<HTMLButtonElement>('[data-dir="-1"]', c)!.disabled = i === 0;
+    $<HTMLButtonElement>('[data-dir="1"]', c)!.disabled = i === chips.length - 1;
+  });
+  void saveTopicOrder(chips.map((c) => c.dataset.slug!));
+}
+
+let pendingTopicOrder: string[] | null = null; // the newest order not yet sent
+let savingTopicOrder = false;
+
+/**
+ * One PUT in flight at a time, and only the newest order is sent: each PUT carries the full order,
+ * so a later one replaces any earlier one. After the last PUT, invalidate; on failure, also reload
+ * (to show the real order) and show the error.
+ */
+async function saveTopicOrder(slugs: string[]) {
+  pendingTopicOrder = slugs;
+  if (savingTopicOrder) return;
+  savingTopicOrder = true;
+  let error: unknown = null;
+  while (pendingTopicOrder) {
+    const order: string[] = pendingTopicOrder;
+    pendingTopicOrder = null;
+    try {
+      await api('PUT', '/api/topics/order', { slugs: order });
+      error = null;
+    } catch (e) {
+      error = e;
+    }
+  }
+  savingTopicOrder = false;
+  invalidate(); // topics show up in every view's nav
+  if (!error) return;
+  await reload();
+  // Query after the reload: swap() replaces #app, which would wipe an earlier message.
+  showError($('[data-testid="topics-manager"] .form-error'), errMsg(error, 'Failed'));
+}
+
 // ---------- modals & forms ----------
 
 function openModal(name: string): HTMLElement {
@@ -677,6 +724,8 @@ document.addEventListener('click', (e) => {
     }
     case 'delete-topic':
       return void deleteTopic(btn);
+    case 'move-topic':
+      return moveTopic(btn);
     default:
       return void rowAction(act, btn);
   }

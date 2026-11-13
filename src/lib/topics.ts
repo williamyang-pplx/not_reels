@@ -7,11 +7,10 @@ export function ensureDefaultTopics(): void {
   const db = getDb();
   const { n } = db.prepare('SELECT COUNT(*) AS n FROM "Topic"').get() as { n: number };
   if (n > 0) return;
-  const insert = db.prepare('INSERT INTO "Topic" ("slug", "label", "createdAt") VALUES (?, ?, ?)');
+  const insert = db.prepare('INSERT INTO "Topic" ("slug", "label", "createdAt", "position") VALUES (?, ?, ?, ?)');
   const now = Date.now();
-  // Same createdAt for the whole batch (like Prisma createMany); listTopics breaks ties by rowid.
   db.transaction(() => {
-    for (const t of DEFAULT_TOPICS) insert.run(t.slug, t.label, now);
+    DEFAULT_TOPICS.forEach((t, i) => insert.run(t.slug, t.label, now, i));
   })();
 }
 
@@ -32,9 +31,18 @@ export function findUnknownTopics(slugs: string[]): string[] {
 export function listTopics(): TopicRecord[] {
   ensureDefaultTopics();
   const rows = getDb()
-    .prepare('SELECT "slug", "label", "createdAt" FROM "Topic" ORDER BY "createdAt" ASC, rowid ASC')
+    .prepare('SELECT "slug", "label", "createdAt" FROM "Topic" ORDER BY "position" ASC, "createdAt" ASC, rowid ASC')
     .all() as { slug: string; label: string; createdAt: number }[];
   return rows.map((r) => ({ slug: r.slug, label: r.label, createdAt: new Date(r.createdAt).toISOString() }));
+}
+
+/** Save a full topic order: slugs[i] gets position i. The caller has checked that slugs is exactly the topic set. */
+export function setTopicOrder(slugs: string[]): void {
+  const db = getDb();
+  const update = db.prepare('UPDATE "Topic" SET "position" = ? WHERE "slug" = ?');
+  db.transaction(() => {
+    slugs.forEach((slug, i) => update.run(i, slug));
+  })();
 }
 
 export function unknownTopicsMessage(unknown: string[]): string {

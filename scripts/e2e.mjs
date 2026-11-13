@@ -148,6 +148,32 @@ try {
   await page.waitForSelector('[data-testid=delete-topic-BOARD_GAMES]', { state: 'detached' });
   ok('delete topic after confirm');
 
+  // Topic reorder: ‹/› moves the chip at once, and the nav pills follow once it is saved.
+  const chipOrder = () => page.$$eval('[data-testid=topic-chip]', (els) => els.map((e) => e.dataset.slug));
+  const pillOrder = () =>
+    page.$$eval('[data-testid^="topic-pill-"]', (els) => els.map((e) => e.dataset.testid.slice('topic-pill-'.length)));
+  const moveTopic = async (dir) => {
+    const saved = page.waitForResponse((r) => r.url().endsWith('/api/topics/order') && r.ok());
+    await page.click(`[data-testid=move-topic-${dir}-TECHNOLOGY]`);
+    await saved;
+  };
+  const startOrder = await chipOrder();
+  const from = startOrder.indexOf('TECHNOLOGY');
+  const [dir, back] = from > 0 ? ['left', 'right'] : ['right', 'left'];
+  await moveTopic(dir);
+  const after = await chipOrder();
+  assert.equal(after.indexOf('TECHNOLOGY'), from + (dir === 'left' ? -1 : 1));
+  ok(`move topic ${dir} moves the chip at once`);
+  await page.click('header a[href="/"]');
+  await page.waitForSelector('[data-testid=topic-filter-row]');
+  assert.deepEqual(await pillOrder(), ['ALL', ...after]);
+  ok('nav pills follow the new topic order');
+  await page.click('[data-testid=nav-manage-link]');
+  await page.waitForSelector('[data-testid=topics-manager]');
+  await moveTopic(back);
+  assert.deepEqual(await chipOrder(), startOrder);
+  ok(`move topic ${back} restores the order`);
+
   // Add a local feed via modal (submit disabled until a topic is checked).
   await page.click('[data-testid=add-feed-btn]');
   assert.equal(await page.isDisabled('[data-testid=add-feed-modal] button[type=submit]'), true);

@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
 import { fail, ok, parseJson } from '../lib/api';
-import { CreateTopicSchema } from '../lib/validations';
-import { listTopics, topicExists } from '../lib/topics';
+import { CreateTopicSchema, ReorderTopicsSchema } from '../lib/validations';
+import { listTopics, setTopicOrder, topicExists } from '../lib/topics';
 
 export const topicsApi = new Hono();
 
@@ -14,9 +14,25 @@ topicsApi.post('/', async (c) => {
   if (topicExists(parsed.data.slug)) return fail(c, 'Topic already exists', 'DUPLICATE', 409);
   const createdAt = Date.now();
   getDb()
-    .prepare('INSERT INTO "Topic" ("slug", "label", "createdAt") VALUES (?, ?, ?)')
+    .prepare(
+      `INSERT INTO "Topic" ("slug", "label", "createdAt", "position")
+       VALUES (?, ?, ?, (SELECT COALESCE(MAX("position"), -1) + 1 FROM "Topic"))`,
+    )
     .run(parsed.data.slug, parsed.data.label, createdAt);
   return ok(c, { slug: parsed.data.slug, label: parsed.data.label, createdAt: new Date(createdAt).toISOString() }, 201);
+});
+
+/** Replace the topic order. 400 unless `slugs` lists every topic exactly once. */
+topicsApi.put('/order', async (c) => {
+  const parsed = await parseJson(c, ReorderTopicsSchema);
+  if (!parsed.ok) return parsed.response;
+  const { slugs } = parsed.data;
+  const existing = new Set(listTopics().map((t) => t.slug));
+  if (new Set(slugs).size !== slugs.length || slugs.length !== existing.size || !slugs.every((s) => existing.has(s))) {
+    return fail(c, 'Order must list every topic exactly once', 'VALIDATION_ERROR', 400);
+  }
+  setTopicOrder(slugs);
+  return ok(c, listTopics());
 });
 
 topicsApi.delete('/:slug', (c) => {

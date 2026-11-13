@@ -45,7 +45,8 @@ export function migrate(conn: DB): void {
 CREATE TABLE IF NOT EXISTS "Topic" (
   "slug" TEXT NOT NULL PRIMARY KEY,
   "label" TEXT NOT NULL,
-  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "position" INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS "Feed" (
   "id" TEXT NOT NULL PRIMARY KEY,
@@ -106,6 +107,7 @@ CREATE TABLE IF NOT EXISTS "HiddenLink" (
 CREATE UNIQUE INDEX IF NOT EXISTS "HiddenLink_url_key" ON "HiddenLink"("url");
 `);
   dropLegacyFeedType(conn);
+  addTopicPosition(conn);
 }
 
 /** Drop the old FORUM/BLOG column (and its index, which SQLite requires first). No-op once gone. */
@@ -113,6 +115,17 @@ function dropLegacyFeedType(conn: DB): void {
   if (!conn.prepare(`SELECT 1 FROM pragma_table_info('Feed') WHERE "name" = 'type'`).get()) return;
   conn.transaction(() => {
     conn.exec('DROP INDEX IF EXISTS "Feed_type_idx"; ALTER TABLE "Feed" DROP COLUMN "type";');
+  })();
+}
+
+/** Add Topic.position to a DB created before topic ordering, numbered in the old createdAt order. No-op once present. */
+function addTopicPosition(conn: DB): void {
+  if (conn.prepare(`SELECT 1 FROM pragma_table_info('Topic') WHERE "name" = 'position'`).get()) return;
+  conn.transaction(() => {
+    conn.exec(`
+ALTER TABLE "Topic" ADD COLUMN "position" INTEGER NOT NULL DEFAULT 0;
+WITH r AS (SELECT "slug", ROW_NUMBER() OVER (ORDER BY "createdAt", rowid) - 1 AS p FROM "Topic")
+UPDATE "Topic" SET "position" = (SELECT p FROM r WHERE r."slug" = "Topic"."slug");`);
   })();
 }
 

@@ -69,6 +69,7 @@ model Topic {
   slug      String      @id            // e.g. "TECHNOLOGY"; regex ^[A-Z0-9_]+$, 1–50 chars
   label     String                     // display name, 1–50 chars
   createdAt DateTime    @default(now())
+  position  Int         @default(0)    // display order on the nav bar and Manage, 0-based
   feeds     FeedTopic[]
 }
 
@@ -143,7 +144,7 @@ model HiddenLink {
 | `FETCH_CONCURRENCY` | 12 |
 
 ### Default topic seeding
-`ensureDefaultTopics()` inserts `DEFAULT_TOPICS` only if the Topic table is empty. It runs on every `GET /api/topics`, so if the user deletes all topics, the defaults come back on the next load.
+`ensureDefaultTopics()` inserts `DEFAULT_TOPICS` only if the Topic table is empty. It runs on every `GET /api/topics`, so if the user deletes all topics, the defaults come back on the next load. The defaults get `position` 0…7 in `DEFAULT_TOPICS` order.
 
 ## 4. API
 
@@ -170,13 +171,15 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
 - `CreateFeedSchema`: `{ name: 1–100, url: FeedUrlSchema, topics: TopicSlug[1..10] }`. Unknown keys (such as a legacy `type`) are stripped.
 - `UpdateFeedSchema`: `{ name?, topics?: [1..10], isActive?: boolean }`.
 - `CreateTopicSchema`: `{ slug: TopicSchema, label: 1–50 }`.
+- `ReorderTopicsSchema`: `{ slugs: TopicSchema[1..] }`.
 - `CreateSavedLinkSchema`: `{ url: url, title: 1–200, topic: TopicSchema, notes?: ≤1000 }`.
 - `UpdateSavedLinkSchema`: `{ title?, topic?, notes? }`.
 - `RefreshBodySchema`: `{ feedId?: string }`.
 
 ### 4.2 Topics
-- **`GET /api/topics`**: seeds the defaults if the table is empty. Returns all topics ordered by `createdAt asc`: `[{slug,label,createdAt}]`.
-- **`POST /api/topics`** `{slug,label}`: returns 409 `DUPLICATE` `"Topic already exists"` if the slug exists. Otherwise returns 201 with the topic.
+- **`GET /api/topics`**: seeds the defaults if the table is empty. Returns all topics ordered by `position asc`, then `createdAt asc`: `[{slug,label,createdAt}]`.
+- **`POST /api/topics`** `{slug,label}`: returns 409 `DUPLICATE` `"Topic already exists"` if the slug exists. Otherwise returns 201 with the topic. The new topic goes last (`position = max + 1`).
+- **`PUT /api/topics/order`** `{slugs}`: `slugs` must list every topic exactly once, else 400 `VALIDATION_ERROR` `"Order must list every topic exactly once"`. Sets each topic's `position` to its index. Returns the topics in the new order.
 - **`DELETE /api/topics/:slug`**:
   - 404 if the topic is missing.
   - A feed is "orphaned" if this topic is its *only* topic. If any feed would be orphaned, the route returns 409 `CONSTRAINT` with the message `"Cannot delete topic — these feeds would have no topic: <names>. Reassign them first."`.
@@ -468,7 +471,8 @@ An item uses this variant when `feedUrl === 'local/rym_music_recs'` or its guid 
      - The slug comes from the label: uppercase it, replace each run of non-`[A-Z0-9]` characters with `_`, and trim leading and trailing `_`.
      - If the slug is empty, show the error `Label must contain letters or digits`.
      - API errors (for example a duplicate) show inline. On success, the input clears and `['topics']` is invalidated.
-   - Topic chips (label plus a red **×**). Clicking × opens `window.confirm("Delete topic "<label>"? This will also delete all feeds and saved links under this topic.")`. If confirmed, it calls DELETE and invalidates topics, feeds, feed-items and saved-links.
+   - Topic chips (‹, label, ›, and a red **×**). ‹ and › move the chip one step left or right at once and save the full order with PUT; ‹ is disabled on the first chip and › on the last. Only one PUT is in flight at a time, carrying the newest order. After the last PUT, it invalidates topics, feeds, feed-items and saved-links; if that PUT failed, the page also reloads and the error shows inline.
+   - Clicking × opens `window.confirm("Delete topic "<label>"? This will also delete all feeds and saved links under this topic.")`. If confirmed, it calls DELETE and invalidates topics, feeds, feed-items and saved-links.
 2. **"+ Add feed"** button. It opens the **Add a feed** modal, which has:
    - Name (required)
    - URL (text, required, placeholder `https://example.com/rss.xml or local/rym_music_recs`)
@@ -496,7 +500,7 @@ An item uses this variant when `feedUrl === 'local/rym_music_recs'` or its guid 
 - Feed page: `feed-list`, `refresh-button`, `refresh-status`, `sort-{recommended|new|random}`, `sentinel`, `empty-state`.
 - Feed cards: `feed-card`, `save-feed-item-btn`, `hide-feed-item-btn`, `archive-feed-item-btn`, `youtube-music-feed-item-link`.
 - Saved page: `saved-link-card`, `saved-link-delete`, `add-saved-link-btn`, `add-saved-link-modal`.
-- Manage page: `add-feed-btn`, `add-feed-modal`, `edit-feed-modal`, `feed-row`, `feed-pause-btn`, `feed-edit-btn`, `feed-delete-btn`, `topics-manager`, `topic-input`, `add-topic-btn`, `topic-chip`, `delete-topic-{slug}`, `topic-checkbox-{slug}`.
+- Manage page: `add-feed-btn`, `add-feed-modal`, `edit-feed-modal`, `feed-row`, `feed-pause-btn`, `feed-edit-btn`, `feed-delete-btn`, `topics-manager`, `topic-input`, `add-topic-btn`, `topic-chip`, `move-topic-left-{slug}`, `move-topic-right-{slug}`, `delete-topic-{slug}`, `topic-checkbox-{slug}`.
 
 ## 9. Visual design, PWA and security
 

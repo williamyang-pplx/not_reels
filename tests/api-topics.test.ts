@@ -74,6 +74,37 @@ describe('POST /api/topics', () => {
   });
 });
 
+describe('PUT /api/topics/order', () => {
+  const DEFAULTS = ['NEWS', 'MUSIC', 'LITERATURE', 'TECHNOLOGY', 'SCIENCE', 'CULTURE', 'POLITICS', 'OTHER'];
+  const slugsOf = (body: { data: { slug: string }[] }) => body.data.map((t) => t.slug);
+  const otherFirst = ['OTHER', ...DEFAULTS.filter((s) => s !== 'OTHER')];
+
+  it('saves the full order and returns it', async () => {
+    const res = await json('PUT', '/api/topics/order', { slugs: otherFirst });
+    expect(res.status).toBe(200);
+    expect(slugsOf(await res.json())).toEqual(otherFirst);
+    expect(slugsOf(await request('/api/topics').then((r) => r.json()))).toEqual(otherFirst);
+  });
+
+  it.each([
+    ['a missing slug', DEFAULTS.slice(1)],
+    ['an unknown slug', [...DEFAULTS.slice(1), 'NOPE']],
+    ['an extra slug', [...DEFAULTS, 'NOPE']],
+    ['a duplicate', [...DEFAULTS.slice(1), 'MUSIC']],
+  ])('rejects %s with 400 and keeps the order', async (_, slugs) => {
+    const res = await json('PUT', '/api/topics/order', { slugs });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe('VALIDATION_ERROR');
+    expect(slugsOf(await request('/api/topics').then((r) => r.json()))).toEqual(DEFAULTS);
+  });
+
+  it('puts a topic created after a reorder last', async () => {
+    await json('PUT', '/api/topics/order', { slugs: otherFirst });
+    await json('POST', '/api/topics', { slug: 'GAMING', label: 'Gaming' });
+    expect(slugsOf(await request('/api/topics').then((r) => r.json()))).toEqual([...otherFirst, 'GAMING']);
+  });
+});
+
 describe('DELETE /api/topics/[slug]', () => {
   it('refuses to delete with 409 when it would orphan a single-topic feed', async () => {
     createFeed({ topics: ['MUSIC'], name: 'OnlyMusic', url: 'https://m' });

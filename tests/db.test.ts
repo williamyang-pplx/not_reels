@@ -77,11 +77,28 @@ describe('migrate', () => {
     expect(conn.prepare('SELECT COUNT(*) AS n FROM "FeedItem"').get()).toEqual({ n: 1 });
   });
 
+  it('adds Topic.position numbered in the old createdAt order', () => {
+    const conn = open();
+    conn.exec(LEGACY_SCHEMA);
+    conn.exec(`
+      INSERT INTO "Topic" ("slug", "label", "createdAt") VALUES ('LATER', 'Later', 2000);
+      INSERT INTO "Topic" ("slug", "label", "createdAt") VALUES ('EARLIER', 'Earlier', 1000);
+    `);
+
+    migrate(conn);
+
+    expect(conn.prepare('SELECT "slug", "position" FROM "Topic" ORDER BY "position"').all()).toEqual([
+      { slug: 'EARLIER', position: 0 },
+      { slug: 'LATER', position: 1 },
+    ]);
+  });
+
   it('is idempotent on a fresh DB', () => {
     const conn = open();
     migrate(conn);
     migrate(conn);
     expect(columns(conn)).not.toContain('type');
     expect(columns(conn)).toContain('sourceKind');
+    expect(conn.prepare(`SELECT 1 AS ok FROM pragma_table_info('Topic') WHERE "name" = 'position'`).get()).toEqual({ ok: 1 });
   });
 });

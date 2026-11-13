@@ -149,6 +149,8 @@ describe('GET /saved and /manage', () => {
       'add-topic-btn',
       'topic-chip',
       'delete-topic-NEWS',
+      'move-topic-left-NEWS',
+      'move-topic-right-NEWS',
       'add-feed-btn',
       'add-feed-modal',
       'edit-feed-modal',
@@ -160,9 +162,20 @@ describe('GET /saved and /manage', () => {
     ]) {
       expect(body, id).toContain(`data-testid="${id}"`);
     }
+    const tag = (id: string) => body.match(new RegExp(`<button[^>]*data-testid="${id}"[^>]*>`))![0];
+    expect(tag('move-topic-left-NEWS')).toContain('disabled=""'); // first chip
+    expect(tag('move-topic-right-NEWS')).not.toContain('disabled=""');
     expect(body).not.toContain('data-testid="type-filter-row"');
     expect(body).toContain('paused');
     expect(body).toContain('Resume');
+  });
+
+  it('renders the nav topic pills in the saved order, after All', async () => {
+    const defaults = ['NEWS', 'MUSIC', 'LITERATURE', 'TECHNOLOGY', 'SCIENCE', 'CULTURE', 'POLITICS', 'OTHER'];
+    await json('PUT', '/api/topics/order', { slugs: ['OTHER', ...defaults.filter((s) => s !== 'OTHER')] });
+    const { body } = await html('/');
+    const pills = [...body.matchAll(/data-testid="topic-pill-([A-Z0-9_]+)"/g)].map((m) => m[1]);
+    expect(pills.slice(0, 3)).toEqual(['ALL', 'OTHER', 'NEWS']);
   });
 
   it('shows the manage empty state', async () => {

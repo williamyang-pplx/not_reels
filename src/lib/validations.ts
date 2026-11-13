@@ -44,6 +44,10 @@ export const CreateTopicSchema = z.object({
   label: TopicLabelSchema,
 });
 
+export const ReorderTopicsSchema = z.object({
+  slugs: z.array(TopicSchema).min(1),
+});
+
 export const CreateFeedSchema = z.object({
   name: z.string().min(1).max(100),
   url: FeedUrlSchema,
