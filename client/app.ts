@@ -430,9 +430,14 @@ async function refreshAll(btn: HTMLButtonElement) {
   btn.disabled = true;
   btn.textContent = 'Refreshing…';
   try {
-    const r = await api<{ refreshed: number; newItems: number; failed: number }>('POST', '/api/feed-items/refresh', {});
+    const r = await api<{ refreshed: number; newItems: number; failed: number; queued: number }>(
+      'POST',
+      '/api/feed-items/refresh',
+      {},
+    );
     refreshStatus =
       r.failed > 0 ? `Refreshed ${r.refreshed}, ${r.newItems} new, ${r.failed} failed` : `Refreshed ${r.refreshed} · ${r.newItems} new`;
+    if (r.queued > 0) refreshStatus += ` · ${r.queued} Reddit feeds still loading`;
     invalidate('feed');
     await reload();
   } catch {

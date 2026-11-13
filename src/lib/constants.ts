@@ -21,7 +21,6 @@ export const RELEVANT_FETCH_SIZE = 200;
 
 export const MAX_ITEMS_PER_FEED = 30;
 
-export const FETCH_ERROR_THRESHOLD = 5;
 export const FETCH_CONCURRENCY = 12;
 
 export const RYM_FEED_URL = 'local/rym_music_recs';

@@ -150,9 +150,9 @@ export async function refreshSingleFeed(feedId: string, options?: RefreshOptions
   // fetch normalized items (LOCAL provider | RSS fetcher, lazy-imported) → in one tx:
   // upsert (INSERT ... ON CONFLICT(feedId,guid) DO UPDATE), count new, mark stale (rank 10000),
   // set lastFetched/fetchErrorCount=0, prune to 30 (RYM) / 15 (sourceRank asc, publishedAt desc)
-  // catch: fetchErrorCount+1, deactivate at ≥5, log "[feed-refresh] failed feed=<id> url=<url>:"
+  // catch: fetchErrorCount+1 (never deactivates), log "[feed-refresh] failed feed=<id> url=<url>:"
 // R2 — refreshFeeds(type) removed with the forum/blog split
-export async function refreshAllFeeds(options?: RefreshOptions): Promise<RefreshResult>  // R3 — every active feed, one p-limit(12) pool
+export async function refreshAllFeeds(options?: RefreshOptions): Promise<RefreshResult>  // R3 — every active feed, one p-limit(12) pool; subreddit feeds go in multireddit batches of 8, the first inline, the rest in a background pass 61 s apart, 429s retried once (src/lib/reddit-feeds.ts)
 
 // src/lib/local-feeds/rym-music-recs.ts
 export async function rymMusicRecsProvider(ctx: LocalFeedContext): Promise<LocalFeedItemInput[]>  // L1

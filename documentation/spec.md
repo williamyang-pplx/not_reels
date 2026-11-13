@@ -140,7 +140,6 @@ model HiddenLink {
 | `PAGE_SIZE_DEFAULT` / `PAGE_SIZE_MAX` | 100 / 100 |
 | `RELEVANT_FETCH_SIZE` | 200 (candidate pool for Hot and Random) |
 | `MAX_ITEMS_PER_FEED` | 30 |
-| `FETCH_ERROR_THRESHOLD` | 5 |
 | `FETCH_CONCURRENCY` | 12 |
 
 ### Default topic seeding
@@ -224,8 +223,8 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
 - **Item shape:** `{ id, feedId, guid, title, link, summary, author, publishedAt (ISO), feedName, feedUrl, feedTopics: string[] }`.
 
 **`POST /api/feed-items/refresh`** `{feedId?}`
-- With `feedId`: 404 `"Feed not found"` if missing. Otherwise call `refreshSingleFeed`. This runs even if the feed is inactive. Returns `{ refreshed: 0|1, newItems, failed: 0|1 }`.
-- Without `feedId`: call `refreshAllFeeds()` and return `{ refreshed, newItems, failed }`.
+- With `feedId`: 404 `"Feed not found"` if missing. Otherwise call `refreshSingleFeed`. This runs even if the feed is inactive. Returns `{ refreshed: 0|1, newItems, failed: 0|1, queued: 0 }`.
+- Without `feedId`: call `refreshAllFeeds()` and return `{ refreshed, newItems, failed, queued }`.
 
 ### 4.5 Saved links
 - **`GET /api/saved-links?topic=`**: optional topic filter (`ALL` means none). Ordered by `savedAt desc`.
@@ -240,8 +239,19 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
 ## 5. Feed refresh pipeline
 
 ### 5.1 `refreshAllFeeds()`
-1. Load every **active** feed. Refresh each one through `refreshSingleFeed`, with one `p-limit(FETCH_CONCURRENCY=12)` limiter.
-2. For the result: `refreshed` counts successes, `failed` counts failures, and `newItems` is the sum of `newItems`.
+1. Load every **active** feed. Refresh each one as in §5.2, with one `p-limit(FETCH_CONCURRENCY=12)` limiter.
+2. **Subreddit feeds are batched.** Reddit allows few unauthenticated RSS requests per IP and answers 429 to the rest. Measured from a residential IP in 2026-11: **1 request per clock minute** on `www.reddit.com` (the window resets at :00, and 429s do not use budget). `.json` returns 403 without OAuth, and `old.reddit.com` redirects to a login page.
+   - A subreddit feed is an RSS feed on a Reddit host whose path is `/r/<sub>.rss`, `/r/<sub>/.rss`, `/r/<sub>/<sort>.rss` or `/r/<sub>/<sort>/.rss`, with no query string. The sort defaults to `hot`.
+   - Subreddit feeds are grouped by sort, then split into batches of at most `SUBREDDITS_PER_REQUEST` (8) unique subreddits. Each batch is one request: `https://www.reddit.com/r/<a>+<b>+…/<sort>.rss?limit=100`. Reddit returns at most 100 entries per request, so the batch size keeps a share for each subreddit.
+   - Each entry goes to the feed whose subreddit (case-insensitive) is in the entry's `/r/<sub>/comments/…` link. Other entries are dropped. `sourceRank` is the index within that feed's entries. Then store as in §5.2 steps 3–6.
+3. **Reddit pacing.** The server records the time of every Reddit request (batches, and single RSS feeds on a Reddit host).
+   - The batches of one refresh run one at a time in a **Reddit pass**, each at least `REDDIT_REQUEST_INTERVAL_MS` (61 s) after the last Reddit request.
+   - If no Reddit request was made in the last 61 s, the first batch runs at once and the HTTP response waits for it. The other batches run in the background.
+   - A batch that gets a **429** goes to the back of the pass, without recording a failure, and is retried once (a freshly started process does not know what budget is left). A second 429, or any other error, records a failure for every feed in the batch (§5.2 step 7).
+   - While a pass runs, a new full refresh does not fetch subreddit feeds. It counts them as queued.
+   - `POST /api/feed-items/refresh {feedId}` and the initial fetch on create still fetch the feed's own URL at once. They do count as the last Reddit request.
+   - The pass lives in process memory. If the machine stops, the queued batches are lost until the next refresh.
+4. For the result: `refreshed` counts successes, `failed` counts failures, `newItems` is the sum of `newItems`, and `queued` is the number of subreddit feeds left to the background pass.
 
 Make the fetcher, the local provider registry and the concurrency injectable through an options object, so tests can stub them.
 
@@ -257,7 +267,7 @@ Make the fetcher, the local provider registry and the concurrency injectable thr
 4. Set `lastFetched = now` and `fetchErrorCount = 0`.
 5. **Prune:** keep the top N items ordered by `sourceRank asc, publishedAt desc` and delete the rest. N is **30** for every feed (`MAX_ITEMS_PER_FEED`; for `local/rym_music_recs` it is `RYM_ITEMS_PER_REFRESH`, one batch, also 30).
 6. Return `{newItems, ok:true}`.
-7. **If any step throws:** increment `fetchErrorCount`. If it reaches 5 or more, set `isActive=false`. Log `[feed-refresh] failed feed=<id> url=<url>:` and the error. Return `{newItems:0, ok:false}`.
+7. **If any step throws:** increment `fetchErrorCount`. The feed stays active; only the user pauses feeds. Log `[feed-refresh] failed feed=<id> url=<url>:` and the error. Return `{newItems:0, ok:false}`.
 
 ### 5.3 Default RSS fetcher
 - Uses `fetch` with redirects followed and a **10s timeout** through `AbortController`.
@@ -396,7 +406,7 @@ All pages are `force-dynamic`. The root layout wraps the page in the React Query
 ### 8.3 Feed page (`/`)
 - **Toolbar** (one row):
   - **"Refresh feeds"** button (rounded-full outline). It shows "Refreshing…" and is disabled while pending. It calls `POST /api/feed-items/refresh {}`.
-    - On success, the status text reads `Refreshed N · M new`, or `Refreshed N, M new, F failed` if any feed failed. Then it invalidates `['feed-items']`.
+    - On success, the status text reads `Refreshed N · M new`, or `Refreshed N, M new, F failed` if any feed failed. If `queued > 0` it adds ` · Q Reddit feeds still loading`. Then it invalidates `['feed-items']`.
     - On error, the status text reads `Refresh failed`.
     - The status text clears when a new refresh starts.
   - **Sort segmented control:** **Hot** (`recommended`, the default), **New**, **Random**. This is local component state and is not in the URL.
@@ -568,7 +578,9 @@ Write Vitest suites with the same coverage as these existing files:
   - Overwrites on update.
   - Marks stale items with rank 10000.
   - Prunes to 30, and RYM to one batch of 30.
-  - Increments the error count and deactivates the feed at 5.
+  - Increments the error count and never deactivates the feed.
+  - Batches subreddit feeds into multireddit requests of 8 subreddits and splits the entries back.
+  - Runs batches after the first in the background, 61 s apart, retries a 429 once, and does not start a second pass.
   - Resets the error count on success.
   - Skips inactive feeds.
   - Local provider items flow through.
@@ -587,5 +599,5 @@ Write Vitest suites with the same coverage as these existing files:
 - Feed-row Refresh on Manage does not invalidate any query. The UI does not show the result.
 - Hiding an item does not invalidate `['saved-links']`. Saving invalidates both.
 - There is no UI to edit saved links or to unhide hidden links, but the APIs exist.
-- `fetchErrorCount` is not reset when the user resumes a feed by hand. A feed that was auto-deactivated at 5 errors will be deactivated again after one more failure.
-- `CLAUDE.md` says `p-limit(4)` and "prune by publishedAt desc". The code uses concurrency 6 and prunes by `sourceRank asc, publishedAt desc`. This spec follows the code.
+- `fetchErrorCount` is not reset when the user resumes a feed by hand.
+- `CLAUDE.md` says `p-limit(4)` and "prune by publishedAt desc". The code uses concurrency 12 (one limiter for all feeds) and prunes by `sourceRank asc, publishedAt desc`. This spec follows the code.

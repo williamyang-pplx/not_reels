@@ -1,5 +1,6 @@
 import Parser from 'rss-parser';
 import { computeGuid } from './guid';
+import { HttpStatusError } from './utils';
 
 export type RawRssItem = {
   guid?: string;
@@ -61,7 +62,7 @@ export const defaultFetcher: FeedFetcher = async (url) => {
       redirect: 'follow',
       signal: controller.signal,
     });
-    if (!res.ok) throw new Error(`Status code ${res.status}`);
+    if (!res.ok) throw new HttpStatusError(res.status);
     body = await res.text();
   } finally {
     clearTimeout(timer);

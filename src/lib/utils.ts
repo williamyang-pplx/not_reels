@@ -69,3 +69,10 @@ export function decodeEntities(str: string): string {
     return NAMED_ENTITIES[code.toLowerCase()] ?? m;
   });
 }
+
+/** A non-2xx response. Duck-typed by `status` so callers need not load the module that threw it. */
+export class HttpStatusError extends Error {
+  constructor(readonly status: number) {
+    super(`Status code ${status}`);
+  }
+}

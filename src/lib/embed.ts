@@ -8,7 +8,7 @@ const YOUTUBE_HOSTS = new Set([
   'youtu.be',
 ]);
 
-const REDDIT_HOSTS = new Set([
+export const REDDIT_HOSTS = new Set([
   'reddit.com',
   'www.reddit.com',
   'old.reddit.com',
