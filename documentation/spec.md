@@ -584,7 +584,7 @@ media-src 'self' https:
   - App `not-reels`, region `ams`.
   - Mount `data` at `/data`, auto-extending (80% threshold, +1GB, up to 10GB).
   - HTTP service on internal port 3000 with `force_https`, auto stop and start, and `min_machines_running 0`.
-  - VM: 1 CPU, 512MB.
+  - VM: 2 shared CPUs, 1 GB (Node, Redlib and sharp share it; it was 1 CPU and 512MB before Reddit images were shrunk on the server).
 
 ## 12. Tests to reproduce
 Write Vitest suites with the same coverage as these existing files:
