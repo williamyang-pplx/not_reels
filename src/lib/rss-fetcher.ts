@@ -18,6 +18,8 @@ export type RawRssItem = {
   mediaGroup?: { 'media:description'?: string[] };
   creator?: string;
   author?: string;
+  /** The raw HTML of <content:encoded> (rss-parser keeps it); Redlib's subreddit RSS puts a post's images and video here. */
+  'content:encoded'?: string;
 };
 
 export type ParsedFeed = {
@@ -33,6 +35,8 @@ export interface NormalizedItem {
   author: string | null;
   publishedAt: Date;
   sourceRank: number | null;
+  /** JSON of RedditMedia, set only for Reddit posts (fetchSubredditItems). */
+  media?: string | null;
 }
 
 export const parser = new Parser({

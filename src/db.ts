@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS "FeedItem" (
   "publishedAt" DATETIME NOT NULL,
   "sourceRank" INTEGER,
   "fetchedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "media" TEXT,
   CONSTRAINT "FeedItem_feedId_fkey" FOREIGN KEY ("feedId") REFERENCES "Feed" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "FeedItem_feedId_guid_key" ON "FeedItem"("feedId", "guid");
@@ -110,6 +111,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "HiddenLink_url_key" ON "HiddenLink"("url");
   dropLegacyFeedType(conn);
   addTopicPosition(conn);
   convertSubredditFeeds(conn);
+  addFeedItemMedia(conn);
 }
 
 /** Drop the old FORUM/BLOG column (and its index, which SQLite requires first). No-op once gone. */
@@ -172,6 +174,12 @@ function convertSubredditFeeds(conn: DB): void {
       dropFeed.run(id);
     }
   })();
+}
+
+/** Add FeedItem.media (JSON, nullable: a Reddit post's images, video, link, score) to an older DB. No-op once present. */
+function addFeedItemMedia(conn: DB): void {
+  if (conn.prepare(`SELECT 1 FROM pragma_table_info('FeedItem') WHERE "name" = 'media'`).get()) return;
+  conn.exec('ALTER TABLE "FeedItem" ADD COLUMN "media" TEXT');
 }
 
 /** Run `fn` inside a transaction on the shared connection. */

@@ -66,7 +66,7 @@ sw.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.origin !== location.origin) return;
-  // Top-level loads only: a Redlib window navigating to "/" must reach the server, which sends it back to Redlib
+  // Top-level loads only: a Redlib page (in the sheet) navigating to "/" must reach the server, which sends it back to Redlib
   // (a cached app page would refuse to load in the frame).
   if (request.mode === 'navigate' && request.destination === 'document' && PAGE_PATHS.has(url.pathname)) {
     event.respondWith(page(event));

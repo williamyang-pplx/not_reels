@@ -9,6 +9,7 @@ import { feedItemsApi } from './api/feed-items';
 import { savedLinksApi } from './api/saved-links';
 import { hiddenLinksApi } from './api/hidden-links';
 import { pagesRouter } from './pages';
+import { imageCache } from './image-cache';
 import { redlibProxy } from './redlib';
 
 /** Set on every response that has none. Proxied Redlib pages keep Redlib's own CSP (with frame-ancestors 'self'). */
@@ -20,7 +21,7 @@ export const CSP = [
   "font-src 'self' data:",
   "connect-src 'self'",
   "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com",
-  // Nothing frames our pages, so a link inside a Redlib window that reaches one of them can't nest the app.
+  // Nothing frames our pages, so a link inside a Redlib frame that reaches one of them can't nest the app.
   "frame-ancestors 'none'",
   "media-src 'self' https:",
 ].join('; ');
@@ -148,6 +149,7 @@ export function createApp(opts: { staticRoots?: string[] } = {}): Hono {
   app.use('*', staticFiles(roots));
   app.use('*', compress);
   // After compress, so Redlib's HTML, CSS and JS are compressed too; non-Redlib paths fall through.
+  app.use('*', imageCache); // /_img/…: Reddit images, shrunk and cached
   app.use('*', redlibProxy);
 
   app.use('/api/*', async (c, next) => {

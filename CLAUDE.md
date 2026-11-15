@@ -7,10 +7,10 @@ The design is in `documentation/low_level_plan.md` and `documentation/framework_
 - `pnpm build`: Tailwind (inlined into pages), the client bundle `dist/public/app.<hash>.js`, `sw.js`, and `dist/server.mjs`
 - `pnpm start`: `node dist/server.mjs` (PORT, default 3000; DATABASE_URL, default `file:./data/dev.db`). Migrates at boot.
 - `pnpm test`: Vitest (forks, single fork). `pnpm lint` is `tsc --noEmit`.
-- `./scripts/restart.sh`: rebuild, start (or reuse) the `nr-redlib` Docker container on :8180, then serve on :3100 against `/tmp/nr-dev.db` with `REDLIB_URL` set. `docker rm -f nr-redlib` applies changed Redlib settings.
+- `./scripts/restart.sh`: rebuild, start (or reuse) the `nr-redlib` Docker container on :8180 (with `REDLIB_ENABLE_RSS=on`), then serve on :3100 against `/tmp/nr-dev.db` with `REDLIB_URL` set. `docker rm -f nr-redlib` applies changed Redlib settings.
 - `node scripts/e2e.mjs [db]`: browser pass over every UI flow on a copy of a DB. `node scripts/ui-check.mjs`: screenshots and timings.
 - `scripts/bench/`: the framework benchmark harness (see its README).
-- Deploy (Fly): the image bundles the Redlib binary; `scripts/fly-start.sh` runs it on 127.0.0.1:8080 and then the server. `fly.toml` `[env]` has `REDLIB_URL` and Redlib's defaults.
+- Deploy (Fly): the image bundles the Redlib binary and sharp (its Linux binary only); `scripts/fly-start.sh` runs Redlib on 127.0.0.1:8080 and then the server. `fly.toml` `[env]` has `REDLIB_URL`, `REDLIB_ENABLE_RSS=on` and Redlib's defaults.
 - With a broken `NODE_OPTIONS` preload in the shell, prefix commands with `unset NODE_OPTIONS;`.
 
 ## Architecture
@@ -24,14 +24,16 @@ The design is in `documentation/low_level_plan.md` and `documentation/framework_
     old React Query keys) and prefetches on `pointerdown`.
   - Save, Hide and saved-link Delete are optimistic: the card leaves on tap and comes back on error.
   - Sort is client state. It is kept across pill changes on `/` and reset when `/` is entered from another page. It never goes in the URL.
-- **Service worker** (`client/sw.ts`): stale-while-revalidate for top-level loads of `/`, `/saved` and `/manage` (never frame navigations, so a Redlib window that reaches `/` hits the server's redirect); cache-first for hashed assets.
+- **Service worker** (`client/sw.ts`): stale-while-revalidate for top-level loads of `/`, `/saved` and `/manage` (never frame navigations, so a Redlib page in the sheet that reaches `/` hits the server's redirect); cache-first for hashed assets.
   Pages carry `data-rendered`. The client revalidates a page that is older than 5 s.
   Pages carry `data-build` (CSS + JS hash) and page/partial responses send `X-Build`. On a mismatch the client drops
   the cached pages and reloads once, so a page cached before a deploy never runs new markup with old JS.
-- **Refresh** is manual only (`POST /api/feed-items/refresh`); REDDIT feeds are skipped. rss-parser is imported lazily to keep it off the cold path.
-- **Reddit (Redlib):** subreddit feeds (sourceKind REDDIT) are never fetched. They render as window cards framing a self-hosted
-  Redlib (`src/redlib.ts`), proxied same-origin for an allowlist of Redlib paths with `frame-ancestors 'self'`. Windows take
-  feed slots 1,3,5,2,4 on a view's first page (`mixSubredditWindows`). `REDLIB_URL` unset turns them off. See spec §7.1.
+- **Refresh** is manual only (`POST /api/feed-items/refresh`); REDDIT feeds go one at a time. rss-parser is imported lazily to keep it off the cold path.
+- **Reddit (Redlib):** subreddit feeds (sourceKind REDDIT) are refreshed from a self-hosted Redlib (`src/redlib.ts` proxies it
+  same-origin): its RSS output for text and every image/video, its HTML listing for link, score and comments
+  (`src/lib/reddit-feeds.ts`), stored as normal cards with `FeedItem.media` (JSON). Card images go through `/_img/…`
+  (`src/image-cache.ts`: shrunk to 1080px WebP, cached on disk). A post or its subreddit opens on tap in one sheet outside
+  `#app` (a fresh frame per open). `REDLIB_URL` unset: REDDIT refreshes fail and the sheet is off. See spec §7.1.
 
 ## Conventions
 - API errors use `fail(c, message, code, status)` and the `{ error: { message, code } }` envelope. Validate with the Zod schemas in `src/lib/validations.ts`.

@@ -2,7 +2,7 @@ import { Hono, type Context } from 'hono';
 import type { Child } from 'hono/jsx';
 import { parseFeedItemsQuery } from './api/feed-items';
 import { assets } from './assets';
-import { getItemSummary, listFeedItems, listFeeds, listSavedLinks, listSubredditWindows } from './lib/queries';
+import { getItemSummary, listFeedItems, listFeeds, listSavedLinks } from './lib/queries';
 import { listTopics } from './lib/topics';
 import type { SortOrder } from './lib/types';
 import { decodeEntities, reflowText } from './lib/utils';
@@ -33,8 +33,7 @@ pagesRouter.get('/', (c) => {
   const sort: SortOrder = sortParam === 'new' || sortParam === 'random' ? sortParam : 'recommended';
   const q = parseFeedItemsQuery({ topic, sort });
   const data = 'error' in q ? q : listFeedItems(q);
-  const windows = 'error' in q ? [] : listSubredditWindows(q.topic);
-  return render(c, '/', topic, <FeedPage topic={topic} sort={sort} data={data} windows={windows} />);
+  return render(c, '/', topic, <FeedPage topic={topic} sort={sort} data={data} />);
 });
 
 pagesRouter.get('/saved', (c) => {
@@ -46,7 +45,7 @@ pagesRouter.get('/manage', (c) => {
   return render(c, '/manage', 'ALL', <ManagePage topics={listTopics()} feeds={listFeeds()} />);
 });
 
-/** Next page of cards for infinite scroll (New sort). Only a view's first page carries subreddit windows. */
+/** Next page of cards for infinite scroll (New sort). */
 pagesRouter.get('/_f/items', (c) => {
   const params = c.req.query();
   const q = parseFeedItemsQuery(params);

@@ -14,13 +14,13 @@ if docker info >/dev/null 2>&1; then
         -e REDLIB_DEFAULT_THEME=black -e REDLIB_DEFAULT_LAYOUT=card -e REDLIB_DEFAULT_HIDE_SIDEBAR_AND_SUMMARY=on \
         -e REDLIB_DEFAULT_FIXED_NAVBAR=off -e REDLIB_DEFAULT_USE_HLS=on -e REDLIB_DEFAULT_HIDE_HLS_NOTIFICATION=on \
         -e REDLIB_DEFAULT_DISABLE_VISIT_REDDIT_CONFIRMATION=on -e REDLIB_DEFAULT_BLUR_NSFW=on \
-        -e REDLIB_ROBOTS_DISABLE_INDEXING=on ghcr.io/nachtalb/redlib:latest >/dev/null; }; then
+        -e REDLIB_ROBOTS_DISABLE_INDEXING=on -e REDLIB_ENABLE_RSS=on ghcr.io/nachtalb/redlib:latest >/dev/null; }; then
     REDLIB_URL=http://127.0.0.1:$REDLIB_PORT
   else
-    echo "redlib did not start (port $REDLIB_PORT taken?): Reddit windows are off"
+    echo "redlib did not start (port $REDLIB_PORT taken?): Reddit posts and the sheet are off"
   fi
 else
-  echo "docker is not running: Reddit windows are off"
+  echo "docker is not running: Reddit posts and the sheet are off"
 fi
 
 pkill -f "node dist/server.mjs" 2>/dev/null; sleep 0.2

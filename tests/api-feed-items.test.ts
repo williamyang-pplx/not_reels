@@ -18,6 +18,21 @@ function insertItem(feedId: string, item: { guid: string; title: string; link: s
 const GET = (qs = '') => request(`/api/feed-items${qs}`);
 
 describe('GET /api/feed-items', () => {
+  it("returns a Reddit post's media parsed, and null for other items", async () => {
+    const feed = createFeed({ url: 'https://www.reddit.com/r/x/', sourceKind: 'REDDIT' });
+    const media = { images: ['/preview/pre/a.jpg?s=1'], video: null, url: null, score: '5', comments: 2 };
+    getDb()
+      .prepare(
+        `INSERT INTO "FeedItem" ("id", "feedId", "guid", "title", "link", "publishedAt", "fetchedAt", "media")
+         VALUES (?, ?, 'g', 'Post', 'https://www.reddit.com/r/x/comments/abc12/t/', ?, ?, ?)`,
+      )
+      .run(cuid(), feed.id, Date.now(), Date.now(), JSON.stringify(media));
+    seedItems(createFeed().id, 1);
+    const items = (await (await GET('?sort=new')).json()).data.items as { title: string; media: unknown }[];
+    expect(items.find((i) => i.title === 'Post')?.media).toEqual(media);
+    expect(items.find((i) => i.title !== 'Post')?.media).toBeNull();
+  });
+
   it('returns items sorted by publishedAt desc in sort=new mode', async () => {
     const feed = createFeed({ topic: 'TECHNOLOGY' });
     seedItems(feed.id, 5);
@@ -98,7 +113,7 @@ describe('GET /api/feed-items', () => {
     expect(item.feedUrl).toBe(feed.url);
     expect(item.feedTopics).toEqual(['TECHNOLOGY']);
     expect(Object.keys(item).sort()).toEqual(
-      ['author', 'feedId', 'feedName', 'feedTopics', 'feedUrl', 'guid', 'id', 'link', 'publishedAt', 'summary', 'title'].sort(),
+      ['author', 'feedId', 'feedName', 'feedTopics', 'feedUrl', 'guid', 'id', 'link', 'media', 'publishedAt', 'summary', 'title'].sort(),
     );
   });
 

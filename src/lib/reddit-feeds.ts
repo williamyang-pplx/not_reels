@@ -1,9 +1,12 @@
 import { REDDIT_HOSTS, type RedditPost } from './embed';
+import type { FeedFetcher, NormalizedItem, RawRssItem } from './rss-fetcher';
+import type { RedditMedia } from './types';
+import { decodeEntities } from './utils';
 
 /**
- * Subreddit feeds (sourceKind REDDIT) are never fetched: each one is shown as a window framing its page on a
- * self-hosted Redlib (src/redlib.ts). These helpers recognise subreddit URLs, build the Redlib paths, and place
- * the windows among a view's cards.
+ * Subreddit feeds (sourceKind REDDIT) are read through a self-hosted Redlib (src/redlib.ts): a refresh turns each
+ * subreddit's posts into feed items, and a post or subreddit opens in the Redlib sheet on tap. These helpers
+ * recognise subreddit URLs, build the Redlib paths, and read Redlib's output.
  */
 
 export interface SubredditFeed {
@@ -57,25 +60,127 @@ export function redlibThreadPath(post: RedditPost): string {
   return post.slug ? `${path}/${post.slug}` : path;
 }
 
-/** The feed positions (0-based) windows take, in the order they fill. Windows past the fifth go right after position 4. */
-const WINDOW_SLOTS = [0, 2, 4, 1, 3];
+export type PageFetcher = (url: string) => Promise<string>;
 
-type FeedEntry<I, W> = { item: I } | { window: W };
+type ListingExtras = Pick<RedditMedia, 'url' | 'score' | 'comments'>;
+
+const NO_EXTRAS: ListingExtras = { url: null, score: null, comments: null };
+
+// Every post in Redlib's listing starts <div class="post" id="…"> or <div class="post stickied" id="…">.
+const LISTING_POST = /(?=<div class="post(?: stickied)?" id=")/;
+const THREAD_PATH = /^\/r\/[A-Za-z0-9_]{2,21}\/comments\/([a-z0-9]+)\//i;
+
+/** A thread's post ID from its path. RSS and listing spell non-ASCII slugs differently, so posts are matched on it. */
+function postId(path: string): string | null {
+  return THREAD_PATH.exec(path)?.[1].toLowerCase() ?? null;
+}
+
+/** A Redlib URL or path (absolute when Redlib has REDLIB_FULL_URL) as a same-origin path with its query. */
+function redlibPath(src: string, base: string): string | null {
+  try {
+    const url = new URL(decodeEntities(src), base);
+    return url.pathname + url.search;
+  } catch {
+    return null;
+  }
+}
 
 /**
- * Put windows into the first page of the feed: window k (k < 5) takes position WINDOW_SLOTS[k]. The taken
- * positions are filled in ascending order, so windows keep their order. Windows past the fifth go right after
- * position 4. When items run out, the remaining windows follow them.
+ * The post media in one Redlib RSS item's <content:encoded>: every <img> src (a gallery's images, in order) and the
+ * first <video>'s <source> and poster, as same-origin paths.
  */
-export function mixSubredditWindows<I, W>(items: I[], windows: W[]): FeedEntry<I, W>[] {
-  const taken = new Set(WINDOW_SLOTS.slice(0, windows.length));
-  const out: FeedEntry<I, W>[] = [];
-  let i = 0;
-  let w = 0;
-  for (let pos = 0; i < items.length || w < windows.length; pos++) {
-    const windowHere = taken.has(pos) || pos >= WINDOW_SLOTS.length;
-    if (w < windows.length && (windowHere || i >= items.length)) out.push({ window: windows[w++] });
-    else out.push({ item: items[i++] });
+export function parseRssMedia(contentHtml: string, base: string): Pick<RedditMedia, 'images' | 'video'> {
+  const images = Array.from(contentHtml.matchAll(/<img\b[^>]*\ssrc="([^"]+)"/gi), (m) => redlibPath(m[1], base)).filter(
+    (p): p is string => p !== null,
+  );
+  let video: RedditMedia['video'] = null;
+  const tag = /<video\b([^>]*)>([\s\S]*?)<\/video>/i.exec(contentHtml);
+  const src = tag && /<source\b[^>]*\ssrc="([^"]+)"/i.exec(tag[2]);
+  const videoPath = src && redlibPath(src[1], base);
+  if (tag && videoPath) {
+    const poster = /\sposter="([^"]+)"/i.exec(tag[1]);
+    video = { src: videoPath, poster: poster ? redlibPath(poster[1], base) : null };
+  }
+  return { images, video };
+}
+
+/**
+ * Per post in Redlib's HTML listing: the link-post URL, the score and the comment count, keyed by post ID.
+ * This reads Redlib's markup, so a Redlib upgrade can change it; a post it can't read just gets nulls.
+ */
+export function parseListingExtras(html: string): Map<string, ListingExtras> {
+  const out = new Map<string, ListingExtras>();
+  for (const chunk of html.split(LISTING_POST).slice(1)) {
+    // Flair links are /r/<sub>/search?…, so the first /comments/ href is the permalink.
+    const permalink = /href="(\/r\/[^"/]+\/comments\/[^"]+)"/.exec(chunk);
+    if (!permalink) continue;
+    const thumb = /<a\b[^>]*class="post_thumbnail[^"]*"[^>]*href="([^"]+)"|<a\b[^>]*href="([^"]+)"[^>]*class="post_thumbnail/.exec(chunk);
+    const thumbHref = thumb ? decodeEntities(thumb[1] ?? thumb[2]) : '';
+    const score = /class="post_score" title="([^"]*)"/.exec(chunk)?.[1];
+    const comments = /class="post_comments"[^>]*>[\s\S]*?(\d[\d,]*)\s+comments?/.exec(chunk)?.[1];
+    const id = postId(decodeEntities(permalink[1]));
+    if (!id) continue;
+    out.set(id, {
+      url: /^https?:\/\//i.test(thumbHref) ? thumbHref : null,
+      score: score && score !== 'Hidden' ? score : null,
+      comments: comments ? Number(comments.replace(/,/g, '')) : null,
+    });
   }
   return out;
+}
+
+/** The post's text as plain text: Redlib's markdown HTML without media, the lone "Comments" link, comments or tags. */
+function postText(contentHtml: string): string | null {
+  const html = contentHtml
+    .replace(/<video\b[\s\S]*?<\/video>/gi, '')
+    .replace(/<img\b[^>]*>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '');
+  if (/^\s*(<br\s*\/?>\s*)*<a\b[^>]*>\s*Comments\s*<\/a>\s*$/i.test(html)) return null;
+  const text = decodeEntities(
+    html
+      .replace(/<\/(p|li|h\d|blockquote|pre)>|<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, ''),
+  )
+    .split('\n')
+    .map((line) => line.trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return text || null;
+}
+
+/**
+ * One refresh of a subreddit feed from Redlib: its RSS (text, images, video) and its HTML listing (link, score,
+ * comments), merged by permalink. Links become https://www.reddit.com permalinks so Save/Hide/archive key on them.
+ * Redlib asks Reddit for the subreddit the same way for both; RSS is only the format it answers in.
+ */
+export async function fetchSubredditItems(
+  feed: SubredditFeed,
+  base: string,
+  fetchRss: FeedFetcher,
+  fetchPage: PageFetcher,
+  now: Date,
+): Promise<NormalizedItem[]> {
+  const [parsed, html] = await Promise.all([
+    fetchRss(`${base}/r/${feed.subreddit}/${feed.sort}.rss`),
+    fetchPage(base + redlibSubredditPath(feed)),
+  ]);
+  const extras = parseListingExtras(html);
+  const posts: { raw: RawRssItem; id: string; content: string }[] = [];
+  for (const item of parsed.items) {
+    const path = item.link ? redlibPath(item.link, base)?.split('?')[0] : null;
+    const id = path && postId(path);
+    if (!path || !id) continue;
+    posts.push({ raw: { ...item, guid: path, link: `https://www.reddit.com${path}` }, id, content: item['content:encoded'] ?? '' });
+  }
+  if (parsed.items.length > 0 && posts.length === 0) throw new Error(`No Reddit posts in Redlib's feed for r/${feed.subreddit}`);
+  const { normalizeAll } = await import('./rss-fetcher');
+  return normalizeAll(
+    posts.map((p) => p.raw),
+    now,
+  ).map((item, i) => {
+    const { id, content } = posts[i];
+    const media: RedditMedia = { ...parseRssMedia(content, base), ...(extras.get(id) ?? NO_EXTRAS) };
+    return { ...item, summary: postText(content), media: JSON.stringify(media) };
+  });
 }

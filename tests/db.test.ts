@@ -140,6 +140,15 @@ describe('migrate', () => {
     ]);
   });
 
+  it('adds FeedItem.media to an older database', () => {
+    const conn = open();
+    conn.exec(LEGACY_SCHEMA);
+    migrate(conn);
+    expect(conn.prepare(`SELECT 1 AS ok FROM pragma_table_info('FeedItem') WHERE "name" = 'media'`).get()).toEqual({ ok: 1 });
+    migrate(conn);
+    expect(conn.prepare(`SELECT COUNT(*) AS n FROM pragma_table_info('FeedItem') WHERE "name" = 'media'`).get()).toEqual({ n: 1 });
+  });
+
   it('is idempotent on a fresh DB', () => {
     const conn = open();
     migrate(conn);

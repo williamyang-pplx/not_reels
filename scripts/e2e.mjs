@@ -18,7 +18,7 @@ const rows = Array.from({ length: 120 }, (_, i) =>
   `('e2e-item-${i}','e2e-feed','g${i}','Synthetic item ${i}','https://example.com/e2e/${i}',${now - (i + 1) * 3600_000},${i},${now})`);
 // The flows below use the NEWS and TECHNOLOGY topics; make sure the copy has them whatever the source DB holds.
 execFileSync('sqlite3', [db, `INSERT OR IGNORE INTO Topic (slug,label) VALUES ('NEWS','News'),('TECHNOLOGY','Technology');`]);
-// The copy's own subreddit feeds are dropped, so the window checks see only the synthetic one (under NEWS).
+// The copy's own subreddit feeds are dropped; one synthetic subreddit (under NEWS) is filled by the refresh below.
 execFileSync('sqlite3', [db, `PRAGMA foreign_keys = ON; DELETE FROM Feed WHERE sourceKind = 'REDDIT';
 INSERT INTO Feed (id,name,url,sourceKind,isActive,fetchErrorCount,createdAt,updatedAt) VALUES ('e2e-feed','Synthetic','https://example.invalid/feed.xml','RSS',1,0,${now},${now});
 INSERT INTO FeedTopic VALUES ('e2e-feed','TECHNOLOGY');
@@ -45,10 +45,12 @@ try {
   assert.equal(await page.getAttribute('[data-testid=type-pill-FEED]', 'aria-current'), 'true');
   ok('default view is Feed / All');
 
-  // Save the first card -> leaves the feed, shows up in Saved.
-  const firstTitle = await page.textContent('[data-testid=feed-card] h3');
-  await page.click('[data-testid=feed-card] [data-testid=save-feed-item-btn]');
-  await page.waitForFunction((t) => document.querySelector('[data-testid=feed-card] h3')?.textContent !== t, firstTitle);
+  // Save the first card -> leaves the feed, shows up in Saved. The long-summary card is kept for the More test
+  // below (being newest, it can rank first in Hot).
+  const CARD = '[data-testid=feed-card]:not(:has-text("Synthetic long summary"))';
+  const firstTitle = await page.textContent(`${CARD} h3`);
+  await page.click(`${CARD} [data-testid=save-feed-item-btn]`);
+  await page.waitForFunction((t) => ![...document.querySelectorAll('[data-testid=feed-card] h3')].some((h) => h.textContent === t), firstTitle);
   ok('save removes the card');
   await page.click('[data-testid=type-pill-SAVED]');
   await page.waitForSelector('[data-testid=saved-link-card]');
@@ -80,8 +82,8 @@ try {
   // Hide on the feed.
   await page.click('[data-testid=type-pill-FEED]');
   await page.waitForSelector('[data-testid=feed-card]');
-  const hideHref = await page.getAttribute('[data-testid=feed-card] a', 'href');
-  await page.click('[data-testid=feed-card] [data-testid=hide-feed-item-btn]');
+  const hideHref = await page.getAttribute(`${CARD} a`, 'href');
+  await page.click(`${CARD} [data-testid=hide-feed-item-btn]`);
   await page.waitForFunction((h) => ![...document.querySelectorAll('[data-testid=feed-card] > a')].some((a) => a.getAttribute('href') === h), hideHref);
   await page.reload({ waitUntil: 'networkidle' });
   assert.equal(await page.$(`[data-testid=feed-card] > a[href="${hideHref}"]`), null);
@@ -230,21 +232,34 @@ try {
   assert.equal(await page.evaluate(() => document.getElementById('bar').className === 'on'), false);
   ok('back with modal open releases scroll lock; no stuck progress bar');
 
-  // A subreddit window is the first entry under its topic, and absent elsewhere. With Redlib running
-  // (REDLIB_URL set), its frame lists posts, and a post opens in the frame with its comments.
-  await page.goto(base + '/?topic=NEWS', { waitUntil: 'load' }); // a live frame never reaches networkidle
-  assert.equal(await page.$eval('.feed-items > article', (a) => a.dataset.testid), 'subreddit-window');
-  assert.match(await page.textContent('[data-testid=subreddit-window] .meta b'), /r\/listentothis/);
+  // Reddit posts (refreshed from Redlib above) are cards under their topic. The title opens the post in the sheet;
+  // Close and Escape shut it, leaving the feed where it was; the subreddit name opens the live subreddit.
+  await page.goto(base + '/?topic=NEWS', { waitUntil: 'load' });
   if (process.env.REDLIB_URL) {
-    await page.waitForSelector('[data-testid=subreddit-window] iframe[src="/r/listentothis/hot"]');
-    const frame = page.frameLocator('[data-testid=subreddit-window] iframe');
+    const card = page.locator('[data-testid=feed-card]', { has: page.locator('button.sub', { hasText: 'r/listentothis' }) }).first();
+    await card.scrollIntoViewIfNeeded();
+    // Where the card sits on screen (scrollY alone moves when images above it finish loading).
+    const top = async () => Math.round((await card.boundingBox()).y);
+    const before = await top();
+    await card.locator('a.cl').click();
+    const frame = page.frameLocator('[data-testid=redlib-viewer] iframe');
     await frame.locator('.post').first().waitFor({ timeout: 30_000 });
-    await frame.locator('.post_title a[href*="/comments/"]').first().click();
-    await frame.locator('.comment').first().waitFor({ timeout: 30_000 });
+    await frame.locator('#redlib').click(); // a navigation inside the frame must not trap Close
+    await frame.locator('.post').first().waitFor({ timeout: 30_000 });
+    await page.click('[data-act=close-viewer]');
+    await page.waitForSelector('[data-testid=redlib-viewer]', { state: 'hidden' });
+    assert.equal(await count('[data-testid=redlib-viewer] iframe'), 0);
+    assert.ok(Math.abs((await top()) - before) <= 2, `card moved from ${before}px to ${await top()}px`);
+    assert.equal(await page.evaluate(() => document.documentElement.style.overflow), '');
+    await card.locator('button.sub').click();
+    assert.equal(await page.getAttribute('[data-testid=redlib-viewer] iframe', 'src'), '/r/listentothis');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('[data-testid=redlib-viewer]', { state: 'hidden' });
+    ok('Reddit cards: the post and the subreddit open in the sheet; Close/Escape return to the same spot');
+  } else {
+    assert.equal(await count('[data-sheet]'), 0);
+    ok('Reddit cards: no sheet without REDLIB_URL');
   }
-  await page.goto(base + '/?topic=TECHNOLOGY', { waitUntil: 'load' });
-  assert.equal(await count('[data-testid=subreddit-window]'), 0);
-  ok(process.env.REDLIB_URL ? 'subreddit window: posts, then a thread with comments' : 'subreddit window placement (no REDLIB_URL)');
 
   assert.deepEqual(errors, []);
   ok('no page errors');

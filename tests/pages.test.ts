@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { CSP } from '../src/app';
+import type { RedditMedia } from '../src/lib/types';
 import { createFeed, json, request, resetDb, seedItems } from './helpers';
 
 beforeEach(() => {
@@ -123,7 +124,7 @@ describe('GET /', () => {
   });
 });
 
-describe('subreddit windows', () => {
+describe('Reddit cards', () => {
   const savedRedlibUrl = process.env.REDLIB_URL;
   beforeEach(() => {
     process.env.REDLIB_URL = 'http://127.0.0.1:9';
@@ -133,58 +134,63 @@ describe('subreddit windows', () => {
     else process.env.REDLIB_URL = savedRedlibUrl;
   });
 
-  const subreddit = (sub: string, topics: string[], isActive = true) =>
-    createFeed({ name: `r/${sub}`, url: `https://www.reddit.com/r/${sub}/`, sourceKind: 'REDDIT', topics, isActive });
-  /** The feed's entries in order: W for a window, c for a card. */
-  const entries = (body: string) =>
-    (body.match(/data-testid="(feed-card|subreddit-window)"/g) ?? []).map((m) => (m.includes('window') ? 'W' : 'c')).join('');
+  const NO_MEDIA: RedditMedia = { images: [], video: null, url: null, score: null, comments: null };
 
-  it('puts a subreddit window first under each of its topics and All, and nowhere else', async () => {
-    subreddit('listentothis', ['MUSIC', 'OTHER']);
-    const rss = createFeed({ topics: ['MUSIC', 'OTHER', 'TECHNOLOGY'] });
-    seedItems(rss.id, 3);
-    for (const path of ['/?topic=MUSIC', '/?topic=OTHER', '/']) {
-      const { body } = await html(path);
-      expect(entries(body), path).toBe('Wccc');
-      expect(body).toContain('<iframe data-src="/r/listentothis/hot"');
-    }
-    const { body } = await html('/?topic=TECHNOLOGY');
-    expect(entries(body)).toBe('ccc');
+  async function redditPost(media: Partial<RedditMedia> | null, link = 'https://www.reddit.com/r/pics/comments/abc12/t/') {
+    const feed = createFeed({ name: 'r/pics', url: 'https://www.reddit.com/r/pics/', sourceKind: 'REDDIT', topic: 'NEWS' });
+    const { getDb, cuid } = await import('../src/db');
+    getDb()
+      .prepare(
+        `INSERT INTO "FeedItem" ("id", "feedId", "guid", "title", "link", "summary", "publishedAt", "fetchedAt", "media")
+         VALUES (?, ?, ?, 'A post', ?, 'Post text', ?, ?, ?)`,
+      )
+      .run(cuid(), feed.id, link, link, Date.now(), Date.now(), media && JSON.stringify({ ...NO_MEDIA, ...media }));
+    return (await html('/?topic=NEWS')).body;
+  }
+
+  it('links the title to reddit.com and opens the thread, or the subreddit from its name, in the sheet', async () => {
+    const body = await redditPost({ comments: 3, score: '42' });
+    const card = body.slice(body.indexOf('data-testid="feed-card"'));
+    expect(card.match(/<a [^>]*>/)![0]).toContain('href="https://www.reddit.com/r/pics/comments/abc12/t/"');
+    expect(card.match(/<a [^>]*>/)![0]).toContain('data-sheet="/r/pics/comments/abc12/t"');
+    expect(card).toContain('<button data-sheet="/r/pics" class="sub">r/pics</button>');
+    expect(card).toMatch(/<button data-sheet="\/r\/pics\/comments\/abc12\/t" data-testid="comments-btn">3 comments<\/button>/);
+    expect(card).toContain('↑ 42');
   });
 
-  it('spreads two windows over positions 0 and 2, in every sort', async () => {
-    subreddit('listentothis', ['MUSIC']);
-    subreddit('indieheads', ['MUSIC']);
-    seedItems(createFeed({ topic: 'MUSIC' }).id, 4);
-    for (const sort of ['recommended', 'new', 'random']) {
-      const { body } = await html(`/?topic=MUSIC&sort=${sort}`);
-      expect(entries(body), sort).toBe('WcWccc');
-    }
-    const { body } = await html('/?topic=MUSIC');
-    expect(body.indexOf('r/listentothis')).toBeLessThan(body.indexOf('r/indieheads'));
+  it("shows a post's images through the image shrinker: one full width, several as a gallery", async () => {
+    let body = await redditPost({ images: ['/preview/pre/a.jpg?s=1'] });
+    expect(body).toContain('<img class="rimg" src="/_img/preview/pre/a.jpg?s=1" loading="lazy" alt=""/>');
+    expect(body).not.toContain('class="gal"');
+    resetDb();
+    body = await redditPost({ images: ['/preview/pre/a.jpg?s=1', '/preview/pre/b.jpg?s=2', '/img/c.jpg'] });
+    expect(body.match(/class="rimg"/g)).toHaveLength(3);
+    expect(body).toContain('<span class="gal-n">1 / 3</span>');
   });
 
-  it('never puts windows on an infinite-scroll page', async () => {
-    subreddit('listentothis', ['MUSIC']);
-    seedItems(createFeed({ topic: 'MUSIC' }).id, 3);
-    const { body } = await html('/_f/items?sort=new&topic=MUSIC&cursor=2030-01-01T00:00:00.000Z');
-    expect(entries(body)).toBe('ccc');
+  it('shows a video that downloads nothing until played, with a shrunk poster', async () => {
+    const body = await redditPost({ video: { src: '/vid/abc/CMAF/1080.mp4', poster: '/preview/external-pre/p.png?s=3' } });
+    expect(body).toMatch(/<video class="rvid" controls="" playsinline="" preload="none" poster="\/_img\/preview\/external-pre\/p.png\?s=3" src="\/vid\/abc\/CMAF\/1080.mp4">/);
   });
 
-  it('hides the window of a paused subreddit feed', async () => {
-    subreddit('listentothis', ['MUSIC'], false);
-    const { body } = await html('/?topic=MUSIC');
-    expect(body).not.toContain('data-testid="subreddit-window"');
+  it("gives a YouTube link post the YouTube player, and another link post a link to its site", async () => {
+    let body = await redditPost({ url: 'https://youtu.be/OpG_9PRNzOA' });
+    expect(body).toContain('data-act="yt" data-id="OpG_9PRNzOA"');
+    resetDb();
+    body = await redditPost({ url: 'https://www.example.org/article' });
+    expect(body).toContain('<a class="ext" href="https://www.example.org/article" target="_blank" rel="noopener noreferrer">example.org ↗</a>');
   });
 
-  it('shows a window instead of the empty state when there are no cards', async () => {
-    subreddit('listentothis', ['MUSIC']);
-    const { body } = await html('/?topic=MUSIC');
-    expect(entries(body)).toBe('W');
-    expect(body).not.toContain('No items match these filters yet.');
+  it('loads no frame with the feed; the one sheet sits outside #app', async () => {
+    const body = await redditPost({ images: ['/preview/pre/a.jpg?s=1'] });
+    expect(body).not.toContain('<iframe');
+    expect(body.match(/data-testid="redlib-viewer"/g)).toHaveLength(1);
+    expect(body.indexOf('data-testid="redlib-viewer"')).toBeGreaterThan(body.indexOf('id="app"'));
+    const partial = await (await request('/?topic=NEWS', { headers: { 'X-Partial': '1' } })).text();
+    expect(partial).not.toContain('redlib-viewer');
   });
 
-  it('frames a reddit.com thread from another feed through Redlib', async () => {
+  it('gives a reddit.com thread on a plain RSS card a Comments button', async () => {
     const feed = createFeed({ topic: 'NEWS' });
     const { getDb, cuid } = await import('../src/db');
     getDb()
@@ -194,21 +200,23 @@ describe('subreddit windows', () => {
       )
       .run(cuid(), feed.id, Date.now(), Date.now());
     const { body } = await html('/');
-    expect(body).toContain('<iframe data-src="/r/unixporn/comments/1xv94f8/slug"');
-    expect(body).not.toContain('redditmedia.com');
-
-    delete process.env.REDLIB_URL;
-    const off = await html('/');
-    expect(off.body).not.toContain('<iframe');
+    expect(body).toContain('<button data-sheet="/r/unixporn/comments/1xv94f8/slug" data-testid="comments-btn">Comments</button>');
+    expect(body).not.toContain('class="sub"');
   });
 
-  it('shows a notice instead of a frame when REDLIB_URL is unset', async () => {
+  it('shows plain cards, with no sheet, when REDLIB_URL is unset', async () => {
     delete process.env.REDLIB_URL;
-    subreddit('listentothis', ['MUSIC']);
-    const { body } = await html('/?topic=MUSIC');
-    expect(body).toContain('data-testid="subreddit-window"');
-    expect(body).toContain('class="win-off"');
-    expect(body).not.toContain('<iframe');
+    const body = await redditPost({ images: ['/preview/pre/a.jpg?s=1'], comments: 3 });
+    expect(body).toContain('data-testid="feed-card"');
+    expect(body).not.toContain('data-sheet');
+    expect(body).not.toContain('class="rimg"');
+    expect(body).not.toContain('redlib-viewer');
+  });
+
+  it('lets Manage refresh a REDDIT feed', async () => {
+    createFeed({ name: 'r/pics', url: 'https://www.reddit.com/r/pics/', sourceKind: 'REDDIT' });
+    const { body } = await html('/manage');
+    expect(body).toMatch(/<button type="button" data-act="refresh-feed" class="row-btn">/);
   });
 });
 

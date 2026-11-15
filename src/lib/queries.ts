@@ -1,8 +1,7 @@
 import { getDb, bool, toDate } from '../db';
 import { RELEVANT_FETCH_SIZE } from './constants';
-import { parseSubredditFeedUrl, redlibSubredditPath } from './reddit-feeds';
 import { recommendItems } from './recommendation';
-import type { Feed, FeedItem, SavedLink, SortOrder } from './types';
+import type { Feed, FeedItem, RedditMedia, SavedLink, SortOrder } from './types';
 
 // ---------- feeds ----------
 
@@ -77,27 +76,6 @@ export function getFeed(id: string): FeedDTO | null {
   return mapFeed(row, topicsByFeed([id]).get(id) ?? []);
 }
 
-// ---------- subreddit windows ----------
-
-export interface SubredditWindowDTO {
-  subreddit: string;
-  /** Same-origin Redlib path the window frames, e.g. /r/listentothis/hot. */
-  path: string;
-  /** Topic slugs in FeedTopic PK order; [0] is the primary topic (border color, badge). */
-  topics: string[];
-}
-
-/** Active REDDIT feeds in a topic (or every one for ALL/undefined), oldest feed first. */
-export function listSubredditWindows(topic?: string): SubredditWindowDTO[] {
-  const windows: SubredditWindowDTO[] = [];
-  for (const feed of listFeeds({ topic }).reverse()) {
-    if (feed.sourceKind !== 'REDDIT' || !feed.isActive) continue;
-    const parsed = parseSubredditFeedUrl(feed.url);
-    if (parsed) windows.push({ subreddit: parsed.subreddit, path: redlibSubredditPath(parsed), topics: feed.topics });
-  }
-  return windows;
-}
-
 // ---------- feed items ----------
 
 export interface FeedItemsQuery {
@@ -121,10 +99,21 @@ interface ItemRow {
   sourceRank: number | null;
   feedName: string;
   feedUrl: string;
+  media: string | null;
 }
 
 const ITEM_COLUMNS = `i."id", i."feedId", i."guid", i."title", i."link", i."summary", i."author",
-  i."publishedAt", i."sourceRank", f."name" AS feedName, f."url" AS feedUrl`;
+  i."publishedAt", i."sourceRank", f."name" AS feedName, f."url" AS feedUrl, i."media"`;
+
+/** A Reddit post's stored media, or null (other feeds, or JSON that no longer parses). */
+function parseMedia(json: string | null): RedditMedia | null {
+  if (!json) return null;
+  try {
+    return JSON.parse(json) as RedditMedia;
+  } catch {
+    return null;
+  }
+}
 
 function mapItem(row: ItemRow, topics: string[]): FeedItemDTO {
   return {
@@ -139,6 +128,7 @@ function mapItem(row: ItemRow, topics: string[]): FeedItemDTO {
     feedName: row.feedName,
     feedUrl: row.feedUrl,
     feedTopics: topics,
+    media: parseMedia(row.media),
   };
 }
 

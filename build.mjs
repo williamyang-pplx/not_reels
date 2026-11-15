@@ -45,7 +45,7 @@ await build({
   platform: 'node',
   target: 'node22',
   minify: true,
-  external: ['better-sqlite3'],
+  external: ['better-sqlite3', 'sharp'],
   jsx: 'automatic',
   jsxImportSource: 'hono/jsx',
   // build: names this CSS + JS pair, so a page started from an older cache can tell it is out of date.

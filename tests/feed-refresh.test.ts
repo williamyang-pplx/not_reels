@@ -1,12 +1,20 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { refreshSingleFeed, refreshAllFeeds } from '../src/lib/feed-refresh';
 import type { ParsedFeed } from '../src/lib/rss-fetcher';
 import { resetDb, createFeed, itemsOf, itemByGuid, countItems, feedRow } from './helpers';
 import { MAX_ITEMS_PER_FEED } from '../src/lib/constants';
+import { LISTING_HTML, RSS_ITEMS } from './fixtures/redlib';
 
 function fakeFetcher(items: Array<{ guid?: string; title?: string; link?: string; isoDate?: string }>): () => Promise<ParsedFeed> {
   return async () => ({ title: 'fake', items });
 }
+
+const REDLIB = 'http://127.0.0.1:8180';
+const savedRedlibUrl = process.env.REDLIB_URL;
+afterEach(() => {
+  if (savedRedlibUrl === undefined) delete process.env.REDLIB_URL;
+  else process.env.REDLIB_URL = savedRedlibUrl;
+});
 
 beforeEach(() => {
   resetDb();
@@ -112,12 +120,21 @@ describe('refreshSingleFeed', () => {
     expect(feedRow(feed.id)?.fetchErrorCount).toBe(0);
   });
 
-  it('returns ok without fetching a REDDIT feed', async () => {
+  it('refreshes a REDDIT feed from Redlib', async () => {
+    process.env.REDLIB_URL = REDLIB;
     const feed = createFeed({ url: 'https://www.reddit.com/r/listentothis/', sourceKind: 'REDDIT' });
-    const fetcher = vi.fn(fakeFetcher([{ guid: 'a', title: 'A', link: 'L' }]));
-    expect(await refreshSingleFeed(feed.id, { fetcher })).toEqual({ newItems: 0, ok: true });
-    expect(fetcher).not.toHaveBeenCalled();
-    expect(countItems(feed.id)).toBe(0);
+    const r = await refreshSingleFeed(feed.id, { fetcher: async () => ({ items: RSS_ITEMS }), pageFetcher: async () => LISTING_HTML });
+    expect(r).toEqual({ newItems: 3, ok: true });
+    const stored = itemByGuid(feed.id, '/r/listentothis/comments/1xwqj5c/neo_boys_rich_mans_dreams_punk_1980/')!;
+    expect(stored.link).toBe('https://www.reddit.com/r/listentothis/comments/1xwqj5c/neo_boys_rich_mans_dreams_punk_1980/');
+    expect(JSON.parse(stored.media!)).toMatchObject({ url: 'https://www.youtube.com/watch?v=OpG_9PRNzOA&list=x', comments: 1 });
+  });
+
+  it('increments fetchErrorCount when REDLIB_URL is unset', async () => {
+    delete process.env.REDLIB_URL;
+    const feed = createFeed({ url: 'https://www.reddit.com/r/listentothis/', sourceKind: 'REDDIT' });
+    expect(await refreshSingleFeed(feed.id, { fetcher: async () => ({ items: RSS_ITEMS }) })).toEqual({ newItems: 0, ok: false });
+    expect(feedRow(feed.id)?.fetchErrorCount).toBe(1);
   });
 
   it('returns ok:false when feed does not exist', async () => {
@@ -256,16 +273,20 @@ describe('refreshAllFeeds', () => {
     expect(countItems(b.id)).toBe(1);
   });
 
-  it('skips REDDIT feeds', async () => {
+  it('refreshes REDDIT feeds from Redlib, beside the RSS feeds', async () => {
+    process.env.REDLIB_URL = REDLIB;
     const rss = createFeed({ url: 'https://a.example' });
     const reddit = createFeed({ url: 'https://www.reddit.com/r/listentothis/', sourceKind: 'REDDIT' });
     const urls: string[] = [];
     const items = [{ guid: 'g', title: 'T', link: 'L', isoDate: '2026-04-14T10:00:00Z' }];
-    const result = await refreshAllFeeds({ fetcher: async (url) => (urls.push(url), { title: 'fake', items }) });
-    expect(result).toEqual({ refreshed: 1, newItems: 1, failed: 0 });
-    expect(urls).toEqual(['https://a.example']);
+    const result = await refreshAllFeeds({
+      fetcher: async (url) => (urls.push(url), { title: 'fake', items: url.startsWith(REDLIB) ? RSS_ITEMS : items }),
+      pageFetcher: async (url) => (urls.push(url), LISTING_HTML),
+    });
+    expect(result).toEqual({ refreshed: 2, newItems: 4, failed: 0 });
+    expect(urls.sort()).toEqual([`${REDLIB}/r/listentothis/hot`, `${REDLIB}/r/listentothis/hot.rss`, 'https://a.example']);
     expect(countItems(rss.id)).toBe(1);
-    expect(countItems(reddit.id)).toBe(0);
+    expect(countItems(reddit.id)).toBe(3);
   });
 
   it('skips inactive feeds', async () => {

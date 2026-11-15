@@ -81,6 +81,7 @@ export interface ItemRow {
   author: string | null;
   publishedAt: number;
   sourceRank: number | null;
+  media: string | null;
 }
 
 export function itemsOf(feedId: string): ItemRow[] {

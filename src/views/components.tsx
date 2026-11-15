@@ -1,8 +1,9 @@
 import type { Child } from 'hono/jsx';
 import { RYM_FEED_URL } from '../lib/constants';
-import { detectEmbedKind, extractRedditPost, extractYouTubeId, type RedditPost } from '../lib/embed';
-import type { FeedItemDTO, SavedLinkDTO, SubredditWindowDTO } from '../lib/queries';
+import { detectEmbedKind, extractRedditPost, extractYouTubeId } from '../lib/embed';
+import type { FeedItemDTO, SavedLinkDTO } from '../lib/queries';
 import { redlibThreadPath } from '../lib/reddit-feeds';
+import { shrunkImageSrc } from '../image-cache';
 import { redlibUrl } from '../redlib';
 import type { TopicRecord } from '../lib/types';
 import { decodeEntities, formatRelativeTime, reflowText, topicColor } from '../lib/utils';
@@ -148,43 +149,29 @@ function YouTubeFacade({ id, title }: { id: string; title: string }) {
   );
 }
 
-// Same-origin Redlib pages need scripts, Redlib's settings cookies, forms (search, settings) and new tabs for
-// off-site links (see rewriteRedlibHtml).
-const REDLIB_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox';
-
-/** A reddit.com thread linked from another feed, framed from Redlib with its comments. */
-function RedlibThread({ post, title }: { post: RedditPost; title: string }) {
+/** A post's images as on Reddit: one full width, or a gallery strip that swipes, with an "i / n" counter below it. */
+function RedditImages({ images }: { images: string[] }) {
+  if (images.length === 1) return <img class="rimg" src={shrunkImageSrc(images[0])} loading="lazy" alt="" />;
   return (
-    // data-src: the client sets src once the card is ~300px from the viewport (see client/app.ts).
-    <iframe
-      data-src={redlibThreadPath(post)}
-      title={title || `Reddit thread in r/${post.subreddit}`}
-      loading="lazy"
-      sandbox={REDLIB_SANDBOX}
-      class="win-frame"
-    ></iframe>
+    <>
+      <div class="gal">
+        {images.map((src) => (
+          <img class="rimg" src={shrunkImageSrc(src)} loading="lazy" alt="" />
+        ))}
+      </div>
+      <span class="gal-n">1 / {images.length}</span>
+    </>
   );
 }
 
-/** A subreddit as a window: a frame of its Redlib page that scrolls on its own, between the feed's cards. */
-export function SubredditWindow({ sub }: { sub: SubredditWindowDTO }) {
-  const topic = sub.topics[0];
+/** A link post's target, shown under the text: "youtube.com ↗". Only http(s) URLs (safeHref) get one. */
+function LinkOut({ url }: { url: string }) {
+  const href = safeHref(url);
+  if (!href) return null;
   return (
-    <article data-testid="subreddit-window" data-topic={topic} class="card fc win" style={`border-color:${topicColor(topic)}`}>
-      <div class="meta">
-        <b>r/{sub.subreddit}</b>
-        <a href={safeHref(`https://www.reddit.com/r/${sub.subreddit}/`)} target="_blank" rel="noopener noreferrer">
-          reddit.com ↗
-        </a>
-      </div>
-      {redlibUrl() ? (
-        // data-src: the client sets src once the card is ~300px from the viewport (see client/app.ts).
-        <iframe data-src={sub.path} title={`r/${sub.subreddit}`} loading="lazy" sandbox={REDLIB_SANDBOX} class="win-frame"></iframe>
-      ) : (
-        <p class="win-off">Reddit windows are off: start Redlib (scripts/restart.sh) and set REDLIB_URL.</p>
-      )}
-      <div class="badges">{topic && <TopicBadge topic={topic} />}</div>
-    </article>
+    <a class="ext" href={href} target="_blank" rel="noopener noreferrer">
+      {new URL(href).host.replace(/^www\./, '')} ↗
+    </a>
   );
 }
 
@@ -193,30 +180,43 @@ export function FeedCard({ item: raw, now }: { item: FeedItemDTO; now: Date }) {
   const topic = item.feedTopics[0];
   const isRym = item.feedUrl === RYM_FEED_URL || item.guid.startsWith('rym-album-');
   const kind = isRym ? null : detectEmbedKind(item.link);
-  const youTubeId = kind === 'youtube' ? extractYouTubeId(item.link) : null;
-  // Without Redlib a reddit.com thread is a plain link card.
+  // A reddit.com thread opens in the Redlib sheet (needs Redlib); a subreddit feed's post also carries its media.
   const reddit = kind === 'reddit' && redlibUrl() ? extractRedditPost(item.link) : null;
+  const thread = reddit && redlibThreadPath(reddit);
+  const media = reddit ? item.media : null;
+  const youTubeId = kind === 'youtube' ? extractYouTubeId(item.link) : media?.url ? extractYouTubeId(media.url) : null;
   const rym = isRym ? parseRymMusicRec(item) : null;
   const shownTitle = rym ? rym.albumTitle : item.title;
   const summary = !rym && item.summary ? summaryExcerpt(item.summary) : null;
+  const name = item.feedName || (isRym ? 'Rate Your Music' : 'Unknown');
+  const meta = (sourceName: Child) => (
+    <div class="meta">
+      {sourceName}
+      <time datetime={item.publishedAt}>{formatRelativeTime(item.publishedAt, now)}</time>
+    </div>
+  );
 
   // Markup is kept terse (short classes from styles.css, no duplicated data) because a page
   // carries up to 100 of these. The client reads the link from the first <a href> and the
-  // title from the <h3> unless data-title says otherwise.
+  // title from the <h3> unless data-title says otherwise. On a subreddit post the meta row sits
+  // outside the link, so its subreddit button is not inside an <a>.
   return (
     <article
       data-testid="feed-card"
       data-topic={topic}
       data-title={raw.title !== shownTitle ? raw.title : undefined}
       data-href={safeHref(item.link) ? undefined : item.link}
-      class={youTubeId || reddit ? 'card fc embed' : 'card fc'}
+      class={youTubeId || media?.images.length || media?.video ? 'card fc embed' : 'card fc'}
       style={`border-color:${topicColor(topic)}`}
     >
-      <a href={safeHref(item.link)} target="_blank" rel="noopener noreferrer" class="cl">
-        <div class="meta">
-          <b>{item.feedName || (isRym ? 'Rate Your Music' : 'Unknown')}</b>
-          <time datetime={item.publishedAt}>{formatRelativeTime(item.publishedAt, now)}</time>
-        </div>
+      {media &&
+        meta(
+          <button data-sheet={`/r/${reddit!.subreddit}`} class="sub">
+            {name}
+          </button>,
+        )}
+      <a href={safeHref(item.link)} target="_blank" rel="noopener noreferrer" data-sheet={media ? thread : undefined} class="cl">
+        {!media && meta(<b>{name}</b>)}
         <h3>{shownTitle}</h3>
         {rym ? (
           <>
@@ -236,10 +236,24 @@ export function FeedCard({ item: raw, now }: { item: FeedItemDTO; now: Date }) {
           More
         </button>
       )}
-      {youTubeId && <YouTubeFacade id={youTubeId} title={item.title} />}
-      {reddit && <RedlibThread post={reddit} title={item.title} />}
+      {media?.video ? (
+        <video
+          class="rvid"
+          controls
+          playsinline
+          preload="none"
+          poster={media.video.poster ? shrunkImageSrc(media.video.poster) : undefined}
+          src={media.video.src}
+        ></video>
+      ) : media?.images.length ? (
+        <RedditImages images={media.images} />
+      ) : (
+        youTubeId && <YouTubeFacade id={youTubeId} title={item.title} />
+      )}
+      {media?.url && !youTubeId && <LinkOut url={media.url} />}
       <div class="badges">
         {topic && <TopicBadge topic={topic} />}
+        {media?.score && <span class="score">↑ {media.score}</span>}
       </div>
       <div class="acts">
         {topic && (
@@ -250,6 +264,11 @@ export function FeedCard({ item: raw, now }: { item: FeedItemDTO; now: Date }) {
         <button data-act="hide" data-testid="hide-feed-item-btn" class="m">
           Hide
         </button>
+        {thread && (
+          <button data-sheet={thread} data-testid="comments-btn">
+            {media?.comments == null ? 'Comments' : `${media.comments} ${media.comments === 1 ? 'comment' : 'comments'}`}
+          </button>
+        )}
         {rym ? (
           <a
             href={youtubeMusicSearchUrl(rym.albumTitle)}
@@ -272,6 +291,20 @@ export function FeedCard({ item: raw, now }: { item: FeedItemDTO; now: Date }) {
         <span class="err" hidden></span>
       </div>
     </article>
+  );
+}
+
+/** The one full-screen Redlib sheet: a bar and an empty body; the client adds a fresh frame each time it opens. */
+export function RedlibViewer() {
+  if (!redlibUrl()) return null;
+  return (
+    <div data-testid="redlib-viewer" class="viewer" hidden role="dialog" aria-modal="true" aria-label="Reddit">
+      <div class="viewer-bar">
+        <b class="viewer-title"></b>
+        <button data-act="close-viewer">Close</button>
+      </div>
+      <div class="viewer-body"></div>
+    </div>
   );
 }
 

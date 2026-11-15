@@ -15,9 +15,6 @@ const cache = new Map<string, Entry>();
 let sort: Sort = (app.querySelector<HTMLElement>('[data-current-sort]')?.dataset.currentSort as Sort) || 'recommended';
 let refreshStatus: string | null = null;
 let navToken = 0;
-// Set once the user scrolls or taps inside a Redlib frame of the current view, so background revalidation never
-// reloads a window they are reading. The frames are same-origin, so the page can listen inside them.
-let frameTouched = false;
 
 const $ = <T extends Element = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector<T>(sel);
 const $$ = <T extends Element = HTMLElement>(sel: string, root: ParentNode = document) =>
@@ -142,8 +139,8 @@ function prefetch(href: string) {
 function swap(html: string, scroll: number | null) {
   const rows = $$('.pill-row').map((r) => r.scrollLeft);
   app.innerHTML = html;
-  frameTouched = false;
-  document.documentElement.style.overflow = ''; // a modal open in the old view held the scroll lock
+  // A modal open in the old view held the scroll lock; the Redlib sheet lives outside #app and keeps it.
+  document.documentElement.style.overflow = viewerOpen() ? 'hidden' : '';
   $$('.pill-row').forEach((r, i) => (r.scrollLeft = rows[i] ?? 0));
   if (scroll !== null) window.scrollTo(0, scroll);
   hydrate();
@@ -181,7 +178,7 @@ async function navigate(href: string, opts: { push?: boolean; scroll?: number | 
     const seen = mutations;
     load(key, true)
       .then((html) => {
-        if (token === navToken && seen === mutations && html !== hit.html && window.scrollY < 40 && sort !== 'random' && !frameTouched) {
+        if (token === navToken && seen === mutations && html !== hit.html && window.scrollY < 40 && sort !== 'random' && !viewerOpen()) {
           swap(html, null);
         }
       })
@@ -217,49 +214,7 @@ function emptyState(message: string) {
 
 let observer: IntersectionObserver | null = null;
 
-/** Load a frame, and note when the user scrolls or taps inside it (see frameTouched). */
-function startFrame(f: HTMLIFrameElement) {
-  f.addEventListener('load', () => {
-    const touched = () => {
-      if (f.isConnected) frameTouched = true;
-    };
-    try {
-      f.contentWindow?.addEventListener('pointerdown', touched, { passive: true });
-      f.contentWindow?.addEventListener('scroll', touched, { passive: true });
-    } catch {
-      // Not same-origin (an error page from elsewhere): nothing to watch.
-    }
-  });
-  f.src = f.dataset.src!;
-}
-
-/** The view's markup without frame src attributes, which change as frames start loading. */
-function snapshot(): string {
-  return app.innerHTML.replace(/(<iframe\b[^>]*?) src="[^"]*"/g, '$1');
-}
-
-// Redlib frames (subreddit windows and thread embeds) load a lot, so start each one only when its card is
-// about to scroll into view (the browser's own lazy-loading starts them 1250-2500px early).
-const frameObserver =
-  'IntersectionObserver' in window
-    ? new IntersectionObserver(
-        (entries) => {
-          for (const e of entries) {
-            if (!e.isIntersecting) continue;
-            const f = e.target as HTMLIFrameElement;
-            startFrame(f);
-            frameObserver!.unobserve(f);
-          }
-        },
-        { rootMargin: '300px 0px' },
-      )
-    : null;
-
 function hydrate() {
-  for (const f of $$<HTMLIFrameElement>('iframe[data-src]:not([src])')) {
-    if (frameObserver) frameObserver.observe(f);
-    else startFrame(f);
-  }
   const status = $('[data-testid="refresh-status"]');
   if (status && refreshStatus) {
     status.textContent = refreshStatus;
@@ -339,16 +294,13 @@ function detachCard(card: HTMLElement): Comment {
 }
 
 /**
- * After cards are gone for good: re-render if the list is now empty (a list still holding subreddit
- * windows is not). The view's cache entry was
+ * After cards are gone for good: re-render if the list is now empty. The view's cache entry was
  * already dropped by invalidate(); it isn't re-snapshotted, since the DOM may hold live iframes
  * or belong to a view the user has since navigated away from.
  */
 function settleList(markers: Comment[], token: number) {
   markers.forEach((m) => m.remove());
-  if (token === navToken && !$('[data-testid="feed-card"],[data-testid="saved-link-card"],[data-testid="subreddit-window"]', app)) {
-    void reload();
-  }
+  if (token === navToken && !$('[data-testid="feed-card"],[data-testid="saved-link-card"]', app)) void reload();
 }
 
 /**
@@ -594,6 +546,58 @@ function closeModal(modal: HTMLElement) {
   document.documentElement.style.overflow = '';
 }
 
+// ---------- Redlib sheet ----------
+// A Reddit post (with its comments) or a live subreddit, full screen over the feed. Each open gets a fresh frame and
+// each close removes it: navigations inside a kept frame would stay in the joint history, and Back would walk the
+// frame instead of closing the sheet. Opening pushes one history entry, so Back (or the iOS swipe) closes it.
+
+const viewer = () => $<HTMLElement>('[data-testid="redlib-viewer"]');
+const viewerOpen = () => viewer()?.hidden === false;
+let viewerPushed = false;
+let viewerOpener: HTMLElement | null = null;
+
+// Same-origin Redlib pages need scripts, Redlib's settings cookies, forms (search, settings) and new tabs for
+// off-site links (src/redlib.ts rewrites them to target=_blank).
+const REDLIB_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox';
+
+function openViewer(path: string, title: string, opener: HTMLElement) {
+  const v = viewer();
+  if (!v) return;
+  const frame = document.createElement('iframe');
+  frame.src = path;
+  frame.title = title;
+  frame.setAttribute('sandbox', REDLIB_SANDBOX);
+  $('.viewer-body', v)!.replaceChildren(frame);
+  $('.viewer-title', v)!.textContent = title;
+  v.hidden = false;
+  document.documentElement.style.overflow = 'hidden';
+  viewerOpener = opener;
+  $<HTMLButtonElement>('[data-act="close-viewer"]', v)!.focus();
+  history.pushState({ ...history.state, viewer: true }, '');
+  viewerPushed = true;
+}
+
+/** Remove the frame (drops its history entries, stops any video), unlock the page, give focus back. */
+function closeViewer() {
+  const v = viewer();
+  if (!v || v.hidden) return;
+  $('.viewer-body', v)!.replaceChildren();
+  v.hidden = true;
+  document.documentElement.style.overflow = '';
+  viewerOpener?.focus({ preventScroll: true });
+  viewerOpener = null;
+}
+
+/**
+ * Close button and Escape. The frame goes first: pages opened inside it sit in the joint history, so a plain Back
+ * would only step the frame. Removing it drops those entries; then Back pops the sheet's own entry (popstate sees
+ * viewerPushed and leaves the feed alone).
+ */
+function requestCloseViewer() {
+  closeViewer();
+  if (viewerPushed) history.back();
+}
+
 /** Add/Edit feed: submit stays disabled until a topic is picked (spec §8.8). */
 function syncSubmit(modal: HTMLElement) {
   const submit = $<HTMLButtonElement>('button[type="submit"]', modal)!;
@@ -684,6 +688,16 @@ document.addEventListener('pointerdown', (e) => {
 
 document.addEventListener('click', (e) => {
   const me = e as MouseEvent;
+  // A Reddit post's title, subreddit name or Comments: open the Redlib sheet. Without the sheet (an old cached
+  // page, Redlib off) or with a modifier key, the title link opens reddit.com as usual.
+  const sheet = (e.target as HTMLElement).closest<HTMLElement>('[data-sheet]');
+  if (sheet && viewer() && !me.metaKey && !me.ctrlKey && !me.shiftKey && me.button === 0) {
+    e.preventDefault();
+    const card = sheet.closest('article');
+    const title = sheet.classList.contains('sub') ? sheet.textContent!.trim() : (card && $('h3', card)?.textContent) || 'Reddit';
+    openViewer(sheet.dataset.sheet!, title, sheet);
+    return;
+  }
   const a = navLink(e);
   if (a) {
     if (me.metaKey || me.ctrlKey || me.shiftKey || me.button !== 0) return;
@@ -736,6 +750,8 @@ document.addEventListener('click', (e) => {
       return playYouTube(btn);
     case 'more':
       return void toggleSummary(btn, card!);
+    case 'close-viewer':
+      return requestCloseViewer();
     case 'refresh':
       return void refreshAll(btn);
     case 'delete-saved': {
@@ -772,11 +788,34 @@ document.addEventListener('submit', (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+  if (viewerOpen()) return requestCloseViewer();
   const open = $$<HTMLElement>('[data-modal]').find((m) => !m.hidden);
   if (open) closeModal(open);
 });
 
+// A gallery's "i / n" counter follows the strip as it is swiped.
+document.addEventListener(
+  'scroll',
+  (e) => {
+    const gal = e.target;
+    if (!(gal instanceof HTMLElement) || !gal.classList.contains('gal')) return;
+    const counter = gal.nextElementSibling;
+    if (counter?.classList.contains('gal-n')) {
+      counter.textContent = `${Math.round(gal.scrollLeft / gal.clientWidth) + 1} / ${gal.children.length}`;
+    }
+  },
+  { capture: true, passive: true },
+);
+
 window.addEventListener('popstate', (e) => {
+  // Back from the sheet: close it and leave the feed (and its scroll position) alone.
+  if (viewerPushed) {
+    viewerPushed = false;
+    closeViewer();
+    return;
+  }
+  // Forward (or a reload) onto the sheet's old entry: nothing to show.
+  if ((e.state as { viewer?: boolean } | null)?.viewer) return;
   void navigate(location.href, { push: false, scroll: (e.state as { y?: number } | null)?.y ?? 0 });
 });
 
@@ -789,13 +828,12 @@ cache.set(bootKey, { html: app.innerHTML, at: renderedAt });
 hydrate();
 
 // Served from the service worker's page cache: show it, then swap in fresh HTML unless the
-// user has already started scrolling (the page, or inside a frame) or changed anything. Frames
-// starting to load are not a change, hence snapshot().
+// user has already started scrolling, changed anything, or opened the Redlib sheet.
 if (Date.now() - renderedAt > 5_000) {
-  const before = snapshot();
+  const before = app.innerHTML;
   load(bootKey, true)
     .then((html) => {
-      if (snapshot() === before && window.scrollY < 40 && !frameTouched) swap(html, null);
+      if (app.innerHTML === before && window.scrollY < 40 && !viewerOpen()) swap(html, null);
     })
     .catch(() => {});
 }

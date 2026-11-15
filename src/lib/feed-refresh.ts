@@ -14,7 +14,10 @@ import {
   parseLocalFeedUrl,
   type LocalFeedProviderRegistry,
 } from './local-feeds/registry';
+import { fetchSubredditItems, parseSubredditFeedUrl, type PageFetcher } from './reddit-feeds';
 import type { FeedSourceKind } from './types';
+import { HttpStatusError } from './utils';
+import { redlibUrl } from '../redlib';
 
 export interface RefreshResult {
   refreshed: number;
@@ -29,6 +32,8 @@ export interface FeedRefreshResult {
 
 export interface RefreshOptions {
   fetcher?: FeedFetcher;
+  /** HTML fetch for Redlib listing pages (tests stub it). */
+  pageFetcher?: PageFetcher;
   localProviders?: LocalFeedProviderRegistry;
   concurrency?: number;
 }
@@ -47,11 +52,12 @@ function upsertItems(feedId: string, items: NormalizedItem[]): number {
   if (items.length === 0) return 0;
   const db = getDb();
   const upsert = db.prepare(`
-    INSERT INTO "FeedItem" ("id", "feedId", "guid", "title", "link", "summary", "author", "publishedAt", "sourceRank", "fetchedAt")
-    VALUES (@id, @feedId, @guid, @title, @link, @summary, @author, @publishedAt, @sourceRank, @fetchedAt)
+    INSERT INTO "FeedItem" ("id", "feedId", "guid", "title", "link", "summary", "author", "publishedAt", "sourceRank", "fetchedAt", "media")
+    VALUES (@id, @feedId, @guid, @title, @link, @summary, @author, @publishedAt, @sourceRank, @fetchedAt, @media)
     ON CONFLICT ("feedId", "guid") DO UPDATE SET
       "title" = excluded."title", "link" = excluded."link", "summary" = excluded."summary",
-      "author" = excluded."author", "publishedAt" = excluded."publishedAt", "sourceRank" = excluded."sourceRank"`);
+      "author" = excluded."author", "publishedAt" = excluded."publishedAt", "sourceRank" = excluded."sourceRank",
+      "media" = excluded."media"`);
   const guids = Array.from(new Set(items.map((i) => i.guid)));
   const placeholders = guids.map(() => '?').join(',');
   const existing = new Set(
@@ -73,6 +79,7 @@ function upsertItems(feedId: string, items: NormalizedItem[]): number {
       author: it.author,
       publishedAt: it.publishedAt.getTime(),
       sourceRank: it.sourceRank,
+      media: it.media ?? null,
       fetchedAt: now,
     });
   }
@@ -97,7 +104,7 @@ function pruneLimitForFeed(feed: { url: string }): number {
 }
 
 function resolveFeedSourceKind(sourceKind: string): FeedSourceKind {
-  if (sourceKind === 'RSS' || sourceKind === 'LOCAL') return sourceKind;
+  if (sourceKind === 'RSS' || sourceKind === 'LOCAL' || sourceKind === 'REDDIT') return sourceKind;
   throw new Error(`Unsupported feed source kind: ${sourceKind}`);
 }
 
@@ -120,8 +127,24 @@ async function fetchNormalizedItems(feed: FeedRecord, options: RefreshOptions): 
   // rss-parser (and xml2js) load lazily so they stay off the cold-start path.
   const { defaultFetcher, normalizeAll } = await import('./rss-fetcher');
   const fetcher = options.fetcher ?? defaultFetcher;
+
+  if (sourceKind === 'REDDIT') {
+    const base = redlibUrl();
+    if (!base) throw new Error('REDLIB_URL is not set');
+    const sub = parseSubredditFeedUrl(feed.url);
+    if (!sub) throw new Error(`Invalid subreddit URL: ${feed.url}`);
+    return fetchSubredditItems(sub, base, fetcher, options.pageFetcher ?? defaultPageFetcher, now);
+  }
+
   const parsed = await fetcher(feed.url);
   return normalizeAll(parsed.items, now);
+}
+
+/** GET a Redlib page as text with a 10 s timeout; non-2xx throws HttpStatusError, like defaultFetcher. */
+async function defaultPageFetcher(url: string): Promise<string> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+  if (!res.ok) throw new HttpStatusError(res.status);
+  return res.text();
 }
 
 function loadFeed(feedId: string): FeedRecord | undefined {
@@ -154,8 +177,6 @@ function recordFailure(feed: FeedRecord, err: unknown): FeedRefreshResult {
 }
 
 async function refreshLoadedFeed(feed: FeedRecord, options: RefreshOptions): Promise<FeedRefreshResult> {
-  // A subreddit is shown as a Redlib window: there is nothing to fetch.
-  if (feed.sourceKind === 'REDDIT') return { newItems: 0, ok: true };
   try {
     const items = await fetchNormalizedItems(feed, options);
     return { newItems: storeItems(feed, items), ok: true };
@@ -170,13 +191,18 @@ export async function refreshSingleFeed(feedId: string, options: RefreshOptions 
   return refreshLoadedFeed(feed, options);
 }
 
-/** Refresh every active RSS and LOCAL feed through one p-limit pool. REDDIT feeds are skipped. */
+/**
+ * Refresh every active feed. RSS and LOCAL feeds share one p-limit pool; REDDIT feeds run one at a time in their
+ * own pool (each is 2 Redlib requests, so Redlib asks Reddit for one subreddit at a time). A per-feed refresh from
+ * Manage is not pooled.
+ */
 export async function refreshAllFeeds(options: RefreshOptions = {}): Promise<RefreshResult> {
   const limit = pLimit(options.concurrency ?? FETCH_CONCURRENCY);
-  const feeds = getDb()
-    .prepare(`SELECT * FROM "Feed" WHERE "isActive" = 1 AND "sourceKind" != 'REDDIT'`)
-    .all() as FeedRecord[];
-  const results = await Promise.all(feeds.map((feed) => limit(() => refreshLoadedFeed(feed, options))));
+  const redditLimit = pLimit(1);
+  const feeds = getDb().prepare('SELECT * FROM "Feed" WHERE "isActive" = 1').all() as FeedRecord[];
+  const results = await Promise.all(
+    feeds.map((feed) => (feed.sourceKind === 'REDDIT' ? redditLimit : limit)(() => refreshLoadedFeed(feed, options))),
+  );
   return results.reduce<RefreshResult>(
     (acc, r) => ({
       refreshed: acc.refreshed + (r.ok ? 1 : 0),

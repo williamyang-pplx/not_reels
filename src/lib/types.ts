@@ -26,6 +26,18 @@ export interface Feed {
   createdAt: string;
 }
 
+/** What a Reddit post shows besides its text. Stored as JSON in FeedItem.media; paths are same-origin Redlib paths. */
+export interface RedditMedia {
+  /** Every image, in order (one, or a gallery), e.g. /preview/pre/abc.jpeg?width=1080&… */
+  images: string[];
+  video: { src: string; poster: string | null } | null;
+  /** A link post's target (a YouTube URL, an article), absolute http(s). */
+  url: string | null;
+  /** The net score as Redlib gives it ("18"), or null when the subreddit hides it. */
+  score: string | null;
+  comments: number | null;
+}
+
 export interface FeedItem {
   id: string;
   feedId: string;
@@ -38,6 +50,7 @@ export interface FeedItem {
   feedName?: string;
   feedUrl?: string;
   feedTopics?: Topic[];
+  media?: RedditMedia | null;
 }
 
 export interface SavedLink {

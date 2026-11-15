@@ -37,15 +37,13 @@ button { -webkit-user-select: none; user-select: none; }
   .card { @apply rounded-lg bg-card p-4; content-visibility: auto; contain-intrinsic-size: auto 160px; }
   .fc { @apply border-2; }
   .sc { @apply border border-border; }
-  /* Window and thread-embed cards are mostly frame. */
-  .embed, .win { contain-intrinsic-size: auto calc(min(75dvh, 760px) + 90px); }
-  /* A Redlib frame scrolls on its own; the card's header and padding leave room to scroll past it. */
-  .win-frame { @apply mt-2 block w-full rounded-md border border-border bg-muted; height: min(75dvh, 760px); }
-  .win-off { @apply text-sm text-muted-foreground py-6 text-center; }
+  .embed { contain-intrinsic-size: auto 420px; }
   .cl { @apply block rounded-md; margin: -4px; padding: 4px; transition: background-color .1s; }
   .cl:active { background: hsl(0 0% 15% / .6); }
   .meta { @apply flex items-center justify-between gap-2 mb-1.5 text-xs text-muted-foreground; }
-  .meta b { @apply font-bold truncate; }
+  .meta b, .meta .sub { @apply font-bold truncate min-w-0; }
+  /* The subreddit name on a Reddit post: opens the live subreddit in the sheet. */
+  .meta .sub { @apply text-left py-1 -my-1; }
   .meta time { @apply shrink-0; }
   .sc .meta { @apply mb-2; }
   .card h3 { @apply font-bold leading-snug text-foreground; font-size: 17px; }
@@ -67,10 +65,19 @@ button { -webkit-user-select: none; user-select: none; }
   .acts button:disabled { @apply opacity-50; }
   .acts button:active, .acts .ytm:active { opacity: .6; }
   .acts .m { @apply text-muted-foreground; }
+  /* A Reddit post's net score: a pill in Reddit's upvote orange, so it reads at a glance. */
+  .score { @apply inline-flex items-center h-5 px-2 rounded-full text-xs font-bold; color: hsl(16 100% 64%); background: hsl(16 100% 50% / .16); }
   .acts .d { @apply text-destructive; }
   .acts .err { @apply text-xs text-destructive; }
   .ytm { @apply inline-flex items-center gap-1.5; }
   .ytm img { @apply h-4 w-4 shrink-0; }
+  /* Reddit post media, shown as on Reddit: contained, never taller than most of the screen. */
+  .rimg, .rvid { @apply mt-3 block w-full rounded-md bg-black object-contain; min-height: 12rem; max-height: 70dvh; }
+  .gal { @apply mt-3 flex overflow-x-auto snap-x snap-mandatory rounded-md; scrollbar-width: none; }
+  .gal::-webkit-scrollbar { display: none; }
+  .gal .rimg { @apply mt-0 shrink-0 snap-center rounded-none; }
+  .gal-n { @apply block mt-1 text-xs text-muted-foreground; }
+  .ext { @apply mt-2 inline-block text-xs text-primary; }
 }
 
 .row-btn { font-size: .75rem; line-height: 1rem; padding: 0 .625rem; height: 1.875rem; border-radius: .375rem; border: 1px solid hsl(0 0% 18%); }
@@ -82,6 +89,14 @@ button { -webkit-user-select: none; user-select: none; }
 .yt-play { position: absolute; left: 50%; top: 50%; width: 68px; height: 48px; margin: -24px 0 0 -34px; border-radius: 14px; background: rgba(23,23,23,.85); transition: background-color .15s; }
 .yt-play::after { content: ''; position: absolute; left: 28px; top: 14px; border-style: solid; border-width: 10px 0 10px 16px; border-color: transparent transparent transparent #fff; }
 .yt:active .yt-play, .yt:hover .yt-play { background: #f00; }
+
+/* The Redlib sheet (a post with its comments, or a live subreddit): full screen, above the nav. */
+.viewer { position: fixed; inset: 0; z-index: 55; display: flex; flex-direction: column; background: hsl(0 0% 4%); padding-top: env(safe-area-inset-top); overscroll-behavior: contain; }
+.viewer-bar { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .5rem .75rem; border-bottom: 1px solid hsl(0 0% 18%); font-size: .875rem; }
+.viewer-bar b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viewer-bar button { flex-shrink: 0; color: hsl(210 90% 56%); padding: .25rem .5rem; }
+.viewer-body { flex: 1; min-height: 0; display: flex; }
+.viewer-body iframe { flex: 1; width: 100%; border: 0; }
 
 .modal { animation: fade .12s ease-out; }
 .modal .sheet { animation: rise .16s ease-out; max-height: calc(100dvh - 24px - env(safe-area-inset-top)); overflow-y: auto; margin-bottom: env(safe-area-inset-bottom); }
