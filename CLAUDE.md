@@ -38,4 +38,4 @@ The design is in `documentation/low_level_plan.md` and `documentation/framework_
 ## Conventions
 - API errors use `fail(c, message, code, status)` and the `{ error: { message, code } }` envelope. Validate with the Zod schemas in `src/lib/validations.ts`.
 - Feed links are rendered through `safeHref` (only http(s) links are clickable). Keep that guard on any new link output.
-- Keep card markup short (semantic classes in `src/styles.css`), because a page renders up to 100 cards.
+- Keep card markup short (semantic classes in `src/styles.css`), because a page renders up to 50 cards (100 with `?limit=`).

@@ -139,7 +139,7 @@ model HiddenLink {
 | `FEED_SOURCE_KINDS` | `['RSS','LOCAL','REDDIT']` |
 | `LOCAL_FEED_PREFIX` | `'local/'` |
 | `DEFAULT_TOPICS` | NEWS/News, MUSIC/Music, LITERATURE/Literature, TECHNOLOGY/Tech, SCIENCE/Science, CULTURE/Culture, POLITICS/Politics, OTHER/Other (in this order) |
-| `PAGE_SIZE_DEFAULT` / `PAGE_SIZE_MAX` | 100 / 100 |
+| `PAGE_SIZE_DEFAULT` / `PAGE_SIZE_MAX` | 50 / 100 |
 | `RELEVANT_FETCH_SIZE` | 200 (candidate pool for Hot and Random) |
 | `MAX_ITEMS_PER_FEED` | 30 |
 | `FETCH_CONCURRENCY` | 12 |
@@ -210,7 +210,7 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
 **`GET /api/feed-items?topic=&sort=&cursor=&limit=`** (a legacy `type` param is ignored)
 - `sort` is one of `recommended` (default), `new`, `random`. Any other value gives 400 `"Invalid sort"`.
 - Each item carries `media`: the parsed RedditMedia of a Reddit post, else null.
-- `limit` is parsed as an int. If it is under 1 or NaN, return 400 `"Invalid limit"`. Values above 100 are capped to 100. The default is 100.
+- `limit` is parsed as an int. If it is under 1 or NaN, return 400 `"Invalid limit"`. Values above 100 are capped to 100. The default is 50.
 - Base filter:
   - `feed.isActive = true`.
   - The feed has topic `topic` if `topic` is given and is not `ALL` (validated).
@@ -618,7 +618,7 @@ Write Vitest suites with the same coverage as these existing files:
 ## 13. Known quirks (copy them as they are unless told otherwise)
 - The confirm text for deleting a topic says it "will also delete all feeds". In fact the server **refuses** with 409 if any feed would be left with no topic. It deletes only saved links that have that topic.
 - The "primary topic" of an item (used for Save, the border color, the badge and topic balance) is the first FeedTopic row, which means the lowest slug alphabetically. It is not the first topic the user selected.
-- Hot and Random never page (`nextCursor: null`), so you see at most 100 items.
+- Hot and Random never page (`nextCursor: null`), so you see at most 50 items (the default page size).
 - Feed-row Refresh on Manage does not invalidate any query. The UI does not show the result.
 - Hiding an item does not invalidate `['saved-links']`. Saving invalidates both.
 - There is no UI to edit saved links or to unhide hidden links, but the APIs exist.

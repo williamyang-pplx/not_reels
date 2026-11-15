@@ -151,12 +151,12 @@ function YouTubeFacade({ id, title }: { id: string; title: string }) {
 
 /** A post's images as on Reddit: one full width, or a gallery strip that swipes, with an "i / n" counter below it. */
 function RedditImages({ images }: { images: string[] }) {
-  if (images.length === 1) return <img class="rimg" src={shrunkImageSrc(images[0])} loading="lazy" alt="" />;
+  if (images.length === 1) return <img class="rimg" src={shrunkImageSrc(images[0])} loading="lazy" decoding="async" alt="" />;
   return (
     <>
       <div class="gal">
         {images.map((src) => (
-          <img class="rimg" src={shrunkImageSrc(src)} loading="lazy" alt="" />
+          <img class="rimg" src={shrunkImageSrc(src)} loading="lazy" decoding="async" alt="" />
         ))}
       </div>
       <span class="gal-n">1 / {images.length}</span>

@@ -15,7 +15,7 @@ export const DEFAULT_TOPICS: { slug: string; label: string }[] = [
   { slug: 'OTHER', label: 'Other' },
 ];
 
-export const PAGE_SIZE_DEFAULT = 100;
+export const PAGE_SIZE_DEFAULT = 50; // cards per page; fewer cards (and images) on the first paint
 export const PAGE_SIZE_MAX = 100;
 export const RELEVANT_FETCH_SIZE = 200;
 

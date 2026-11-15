@@ -160,7 +160,7 @@ describe('Reddit cards', () => {
 
   it("shows a post's images through the image shrinker: one full width, several as a gallery", async () => {
     let body = await redditPost({ images: ['/preview/pre/a.jpg?s=1'] });
-    expect(body).toContain('<img class="rimg" src="/_img/preview/pre/a.jpg?s=1" loading="lazy" alt=""/>');
+    expect(body).toContain('<img class="rimg" src="/_img/preview/pre/a.jpg?s=1" loading="lazy" decoding="async" alt=""/>');
     expect(body).not.toContain('class="gal"');
     resetDb();
     body = await redditPost({ images: ['/preview/pre/a.jpg?s=1', '/preview/pre/b.jpg?s=2', '/img/c.jpg'] });
@@ -320,17 +320,17 @@ describe('summaries', () => {
 describe('GET /_f/items', () => {
   it('returns the next page of cards with a sentinel cursor for sort=new', async () => {
     const feed = createFeed();
-    seedItems(feed.id, 150);
+    seedItems(feed.id, 75);
     // A legacy `type` param (from stale cached HTML) is ignored.
     const { res, body } = await html('/_f/items?type=FORUM&sort=new');
     expect(res.status).toBe(200);
     expect(body).not.toContain('<html');
-    expect(body.match(/data-testid="feed-card"/g)).toHaveLength(100);
+    expect(body.match(/data-testid="feed-card"/g)).toHaveLength(50);
     const cursor = body.match(/data-testid="sentinel"[^>]*data-cursor="([^"]+)"/)?.[1];
     expect(cursor).toBeTruthy();
 
     const next = await html(`/_f/items?sort=new&cursor=${encodeURIComponent(cursor!)}`);
-    expect(next.body.match(/data-testid="feed-card"/g)).toHaveLength(50);
+    expect(next.body.match(/data-testid="feed-card"/g)).toHaveLength(25);
     expect(next.body).not.toMatch(/data-testid="sentinel"[^>]*data-cursor=/);
   });
 
