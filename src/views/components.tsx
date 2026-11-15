@@ -1,7 +1,9 @@
 import type { Child } from 'hono/jsx';
 import { RYM_FEED_URL } from '../lib/constants';
-import { detectEmbedKind, extractRedditPost, extractYouTubeId } from '../lib/embed';
-import type { FeedItemDTO, SavedLinkDTO } from '../lib/queries';
+import { detectEmbedKind, extractRedditPost, extractYouTubeId, type RedditPost } from '../lib/embed';
+import type { FeedItemDTO, SavedLinkDTO, SubredditWindowDTO } from '../lib/queries';
+import { redlibThreadPath } from '../lib/reddit-feeds';
+import { redlibUrl } from '../redlib';
 import type { TopicRecord } from '../lib/types';
 import { decodeEntities, formatRelativeTime, reflowText, topicColor } from '../lib/utils';
 
@@ -146,18 +148,43 @@ function YouTubeFacade({ id, title }: { id: string; title: string }) {
   );
 }
 
-function RedditEmbed({ subreddit, postId, slug, title }: { subreddit: string; postId: string; slug: string; title: string }) {
+// Same-origin Redlib pages need scripts, Redlib's settings cookies, forms (search, settings) and new tabs for
+// off-site links (see rewriteRedlibHtml).
+const REDLIB_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox';
+
+/** A reddit.com thread linked from another feed, framed from Redlib with its comments. */
+function RedlibThread({ post, title }: { post: RedditPost; title: string }) {
   return (
-    <div class="mt-3 w-full overflow-hidden rounded-md border border-border bg-muted">
-      {/* data-src: the client sets src once the card is ~300px from the viewport (see client/app.ts). */}
-      <iframe
-        data-src={`https://www.redditmedia.com/r/${subreddit}/comments/${postId}/${slug}/?ref_source=embed&ref=share&embed=true`}
-        title={title || `Reddit thread in r/${subreddit}`}
-        loading="lazy"
-        sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-        class="block h-[500px] w-full"
-      ></iframe>
-    </div>
+    // data-src: the client sets src once the card is ~300px from the viewport (see client/app.ts).
+    <iframe
+      data-src={redlibThreadPath(post)}
+      title={title || `Reddit thread in r/${post.subreddit}`}
+      loading="lazy"
+      sandbox={REDLIB_SANDBOX}
+      class="win-frame"
+    ></iframe>
+  );
+}
+
+/** A subreddit as a window: a frame of its Redlib page that scrolls on its own, between the feed's cards. */
+export function SubredditWindow({ sub }: { sub: SubredditWindowDTO }) {
+  const topic = sub.topics[0];
+  return (
+    <article data-testid="subreddit-window" data-topic={topic} class="card fc win" style={`border-color:${topicColor(topic)}`}>
+      <div class="meta">
+        <b>r/{sub.subreddit}</b>
+        <a href={safeHref(`https://www.reddit.com/r/${sub.subreddit}/`)} target="_blank" rel="noopener noreferrer">
+          reddit.com ↗
+        </a>
+      </div>
+      {redlibUrl() ? (
+        // data-src: the client sets src once the card is ~300px from the viewport (see client/app.ts).
+        <iframe data-src={sub.path} title={`r/${sub.subreddit}`} loading="lazy" sandbox={REDLIB_SANDBOX} class="win-frame"></iframe>
+      ) : (
+        <p class="win-off">Reddit windows are off: start Redlib (scripts/restart.sh) and set REDLIB_URL.</p>
+      )}
+      <div class="badges">{topic && <TopicBadge topic={topic} />}</div>
+    </article>
   );
 }
 
@@ -167,7 +194,8 @@ export function FeedCard({ item: raw, now }: { item: FeedItemDTO; now: Date }) {
   const isRym = item.feedUrl === RYM_FEED_URL || item.guid.startsWith('rym-album-');
   const kind = isRym ? null : detectEmbedKind(item.link);
   const youTubeId = kind === 'youtube' ? extractYouTubeId(item.link) : null;
-  const reddit = kind === 'reddit' ? extractRedditPost(item.link) : null;
+  // Without Redlib a reddit.com thread is a plain link card.
+  const reddit = kind === 'reddit' && redlibUrl() ? extractRedditPost(item.link) : null;
   const rym = isRym ? parseRymMusicRec(item) : null;
   const shownTitle = rym ? rym.albumTitle : item.title;
   const summary = !rym && item.summary ? summaryExcerpt(item.summary) : null;
@@ -209,7 +237,7 @@ export function FeedCard({ item: raw, now }: { item: FeedItemDTO; now: Date }) {
         </button>
       )}
       {youTubeId && <YouTubeFacade id={youTubeId} title={item.title} />}
-      {reddit && <RedditEmbed {...reddit} title={item.title} />}
+      {reddit && <RedlibThread post={reddit} title={item.title} />}
       <div class="badges">
         {topic && <TopicBadge topic={topic} />}
       </div>

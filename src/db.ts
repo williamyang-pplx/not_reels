@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { parseSubredditFeedUrl } from './lib/reddit-feeds';
 
 export type DB = Database.Database;
 
@@ -108,6 +109,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "HiddenLink_url_key" ON "HiddenLink"("url");
 `);
   dropLegacyFeedType(conn);
   addTopicPosition(conn);
+  convertSubredditFeeds(conn);
 }
 
 /** Drop the old FORUM/BLOG column (and its index, which SQLite requires first). No-op once gone. */
@@ -126,6 +128,27 @@ function addTopicPosition(conn: DB): void {
 ALTER TABLE "Topic" ADD COLUMN "position" INTEGER NOT NULL DEFAULT 0;
 WITH r AS (SELECT "slug", ROW_NUMBER() OVER (ORDER BY "createdAt", rowid) - 1 AS p FROM "Topic")
 UPDATE "Topic" SET "position" = (SELECT p FROM r WHERE r."slug" = "Topic"."slug");`);
+  })();
+}
+
+/**
+ * Turn RSS feeds that are subreddit listings into REDDIT feeds (shown as Redlib windows) and delete their stored
+ * items. Runs at every boot; once converted no RSS feed matches, so later runs are a no-op.
+ */
+function convertSubredditFeeds(conn: DB): void {
+  const rows = conn.prepare(`SELECT "id", "url" FROM "Feed" WHERE "sourceKind" = 'RSS'`).all() as { id: string; url: string }[];
+  const ids = rows.filter((r) => parseSubredditFeedUrl(r.url)).map((r) => r.id);
+  if (ids.length === 0) return;
+  const convert = conn.prepare(
+    `UPDATE "Feed" SET "sourceKind" = 'REDDIT', "fetchErrorCount" = 0, "updatedAt" = ? WHERE "id" = ?`,
+  );
+  const dropItems = conn.prepare('DELETE FROM "FeedItem" WHERE "feedId" = ?');
+  conn.transaction(() => {
+    const now = Date.now();
+    for (const id of ids) {
+      convert.run(now, id);
+      dropItems.run(id);
+    }
   })();
 }
 

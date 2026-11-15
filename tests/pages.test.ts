@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { CSP } from '../src/app';
 import { createFeed, json, request, resetDb, seedItems } from './helpers';
 
@@ -49,7 +49,8 @@ describe('GET /', () => {
   it('sets the Content-Security-Policy header on pages, API and static responses', async () => {
     expect((await request('/')).headers.get('Content-Security-Policy')).toBe(CSP);
     expect((await request('/api/topics')).headers.get('Content-Security-Policy')).toBe(CSP);
-    expect(CSP).toContain("frame-src https://www.youtube.com https://www.youtube-nocookie.com https://www.redditmedia.com https://embed.reddit.com");
+    expect(CSP).toContain("frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com;");
+    expect(CSP).toContain("frame-ancestors 'none'");
   });
 
   it('marks the Feed pill and the topic pill from the query', async () => {
@@ -119,6 +120,95 @@ describe('GET /', () => {
     expect(body).not.toContain('data-testid="archive-feed-item-btn"');
     expect(body).toContain('Radiohead');
     expect(body).toContain('RYM 4.30');
+  });
+});
+
+describe('subreddit windows', () => {
+  const savedRedlibUrl = process.env.REDLIB_URL;
+  beforeEach(() => {
+    process.env.REDLIB_URL = 'http://127.0.0.1:9';
+  });
+  afterEach(() => {
+    if (savedRedlibUrl === undefined) delete process.env.REDLIB_URL;
+    else process.env.REDLIB_URL = savedRedlibUrl;
+  });
+
+  const subreddit = (sub: string, topics: string[], isActive = true) =>
+    createFeed({ name: `r/${sub}`, url: `https://www.reddit.com/r/${sub}/`, sourceKind: 'REDDIT', topics, isActive });
+  /** The feed's entries in order: W for a window, c for a card. */
+  const entries = (body: string) =>
+    (body.match(/data-testid="(feed-card|subreddit-window)"/g) ?? []).map((m) => (m.includes('window') ? 'W' : 'c')).join('');
+
+  it('puts a subreddit window first under each of its topics and All, and nowhere else', async () => {
+    subreddit('listentothis', ['MUSIC', 'OTHER']);
+    const rss = createFeed({ topics: ['MUSIC', 'OTHER', 'TECHNOLOGY'] });
+    seedItems(rss.id, 3);
+    for (const path of ['/?topic=MUSIC', '/?topic=OTHER', '/']) {
+      const { body } = await html(path);
+      expect(entries(body), path).toBe('Wccc');
+      expect(body).toContain('<iframe data-src="/r/listentothis/hot"');
+    }
+    const { body } = await html('/?topic=TECHNOLOGY');
+    expect(entries(body)).toBe('ccc');
+  });
+
+  it('spreads two windows over positions 0 and 2, in every sort', async () => {
+    subreddit('listentothis', ['MUSIC']);
+    subreddit('indieheads', ['MUSIC']);
+    seedItems(createFeed({ topic: 'MUSIC' }).id, 4);
+    for (const sort of ['recommended', 'new', 'random']) {
+      const { body } = await html(`/?topic=MUSIC&sort=${sort}`);
+      expect(entries(body), sort).toBe('WcWccc');
+    }
+    const { body } = await html('/?topic=MUSIC');
+    expect(body.indexOf('r/listentothis')).toBeLessThan(body.indexOf('r/indieheads'));
+  });
+
+  it('never puts windows on an infinite-scroll page', async () => {
+    subreddit('listentothis', ['MUSIC']);
+    seedItems(createFeed({ topic: 'MUSIC' }).id, 3);
+    const { body } = await html('/_f/items?sort=new&topic=MUSIC&cursor=2030-01-01T00:00:00.000Z');
+    expect(entries(body)).toBe('ccc');
+  });
+
+  it('hides the window of a paused subreddit feed', async () => {
+    subreddit('listentothis', ['MUSIC'], false);
+    const { body } = await html('/?topic=MUSIC');
+    expect(body).not.toContain('data-testid="subreddit-window"');
+  });
+
+  it('shows a window instead of the empty state when there are no cards', async () => {
+    subreddit('listentothis', ['MUSIC']);
+    const { body } = await html('/?topic=MUSIC');
+    expect(entries(body)).toBe('W');
+    expect(body).not.toContain('No items match these filters yet.');
+  });
+
+  it('frames a reddit.com thread from another feed through Redlib', async () => {
+    const feed = createFeed({ topic: 'NEWS' });
+    const { getDb, cuid } = await import('../src/db');
+    getDb()
+      .prepare(
+        `INSERT INTO "FeedItem" ("id", "feedId", "guid", "title", "link", "publishedAt", "fetchedAt")
+         VALUES (?, ?, 'g', 'Lucid', 'https://www.reddit.com/r/unixporn/comments/1xv94f8/slug/', ?, ?)`,
+      )
+      .run(cuid(), feed.id, Date.now(), Date.now());
+    const { body } = await html('/');
+    expect(body).toContain('<iframe data-src="/r/unixporn/comments/1xv94f8/slug"');
+    expect(body).not.toContain('redditmedia.com');
+
+    delete process.env.REDLIB_URL;
+    const off = await html('/');
+    expect(off.body).not.toContain('<iframe');
+  });
+
+  it('shows a notice instead of a frame when REDLIB_URL is unset', async () => {
+    delete process.env.REDLIB_URL;
+    subreddit('listentothis', ['MUSIC']);
+    const { body } = await html('/?topic=MUSIC');
+    expect(body).toContain('data-testid="subreddit-window"');
+    expect(body).toContain('class="win-off"');
+    expect(body).not.toContain('<iframe');
   });
 });
 

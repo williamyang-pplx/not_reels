@@ -1,6 +1,7 @@
 import { raw } from 'hono/html';
 import type { Child } from 'hono/jsx';
-import type { FeedDTO, FeedItemDTO, SavedLinkDTO } from '../lib/queries';
+import type { FeedDTO, FeedItemDTO, SavedLinkDTO, SubredditWindowDTO } from '../lib/queries';
+import { mixSubredditWindows } from '../lib/reddit-feeds';
 import type { FilterType, SortOrder, TopicRecord } from '../lib/types';
 import { assets } from '../assets';
 import {
@@ -8,6 +9,7 @@ import {
   FeedCard,
   Modal,
   SavedLinkCard,
+  SubredditWindow,
   TopicBadge,
   TopicCheckboxList,
   inputClass,
@@ -123,23 +125,25 @@ export function Main({ children }: { children: Child }) {
   return <main class="mx-auto max-w-2xl px-3 pb-10">{children}</main>;
 }
 
-/** Cards plus the infinite-scroll sentinel. Also returned on its own by /_f/items. */
+/** Cards (and, on a view's first page, subreddit windows) plus the infinite-scroll sentinel. Also returned on its own by /_f/items. */
 export function FeedItemsChunk({
   items,
+  windows = [],
   nextCursor,
   query,
   now,
 }: {
   items: FeedItemDTO[];
+  windows?: SubredditWindowDTO[];
   nextCursor: string | null;
   query: string;
   now: Date;
 }) {
   return (
     <>
-      {items.map((item) => (
-        <FeedCard item={item} now={now} />
-      ))}
+      {mixSubredditWindows(items, windows).map((e) =>
+        'window' in e ? <SubredditWindow sub={e.window} /> : <FeedCard item={e.item} now={now} />,
+      )}
       <div data-testid="sentinel" class="sentinel h-8" data-cursor={nextCursor ?? undefined} data-q={query}></div>
     </>
   );
@@ -149,10 +153,12 @@ export function FeedPage({
   topic,
   sort,
   data,
+  windows,
 }: {
   topic: string;
   sort: SortOrder;
   data: { items: FeedItemDTO[]; nextCursor: string | null } | { error: string };
+  windows: SubredditWindowDTO[];
 }) {
   const now = new Date();
   const sp = new URLSearchParams({ sort });
@@ -187,10 +193,10 @@ export function FeedPage({
       <div class="feed-items flex flex-col gap-3">
         {'error' in data ? (
           <EmptyState message="Failed to load feed." />
-        ) : data.items.length === 0 ? (
+        ) : data.items.length === 0 && windows.length === 0 ? (
           <EmptyState message="No items match these filters yet." />
         ) : (
-          <FeedItemsChunk items={data.items} nextCursor={data.nextCursor} query={sp.toString()} now={now} />
+          <FeedItemsChunk items={data.items} windows={windows} nextCursor={data.nextCursor} query={sp.toString()} now={now} />
         )}
       </div>
     </div>
@@ -334,7 +340,12 @@ export function ManagePage({ topics, feeds }: { topics: TopicRecord[]; feeds: Fe
             <div class="text-sm font-bold">{feed.name}</div>
             <div class="text-xs text-muted-foreground break-all">{feed.url}</div>
             <div class="flex gap-2 mt-1">
-              <button type="button" data-act="refresh-feed" disabled={!feed.isActive} class="row-btn">
+              <button
+                type="button"
+                data-act="refresh-feed"
+                disabled={!feed.isActive || feed.sourceKind === 'REDDIT'}
+                class="row-btn"
+              >
                 Refresh
               </button>
               <button
@@ -365,7 +376,7 @@ export function ManagePage({ topics, feeds }: { topics: TopicRecord[]; feeds: Fe
           autocapitalize="off"
           autocorrect="off"
           spellcheck={false}
-          placeholder="https://example.com/rss.xml or local/rym_music_recs"
+          placeholder="https://example.com/rss.xml, https://www.reddit.com/r/sub or local/rym_music_recs"
           class={inputClass}
         />
         <TopicCheckboxList topics={topics} />

@@ -7,13 +7,14 @@ The design is in `documentation/low_level_plan.md` and `documentation/framework_
 - `pnpm build`: Tailwind (inlined into pages), the client bundle `dist/public/app.<hash>.js`, `sw.js`, and `dist/server.mjs`
 - `pnpm start`: `node dist/server.mjs` (PORT, default 3000; DATABASE_URL, default `file:./data/dev.db`). Migrates at boot.
 - `pnpm test`: Vitest (forks, single fork). `pnpm lint` is `tsc --noEmit`.
-- `./scripts/restart.sh`: rebuild, then serve on :3100 against `/tmp/nr-dev.db`.
+- `./scripts/restart.sh`: rebuild, start (or reuse) the `nr-redlib` Docker container on :8180, then serve on :3100 against `/tmp/nr-dev.db` with `REDLIB_URL` set. `docker rm -f nr-redlib` applies changed Redlib settings.
 - `node scripts/e2e.mjs [db]`: browser pass over every UI flow on a copy of a DB. `node scripts/ui-check.mjs`: screenshots and timings.
 - `scripts/bench/`: the framework benchmark harness (see its README).
+- Deploy (Fly): the image bundles the Redlib binary; `scripts/fly-start.sh` runs it on 127.0.0.1:8080 and then the server. `fly.toml` `[env]` has `REDLIB_URL` and Redlib's defaults.
 - With a broken `NODE_OPTIONS` preload in the shell, prefix commands with `unset NODE_OPTIONS;`.
 
 ## Architecture
-- **Server:** Hono (`src/app.ts`) has the CSP on every response, an in-memory static server (brotli/gzip once per file),
+- **Server:** Hono (`src/app.ts`) has the CSP on every response (except proxied Redlib pages, which keep their own), an in-memory static server (brotli/gzip once per file),
   and brotli/gzip for HTML and JSON. JSON API routes are in `src/api/*`. HTML routes are in `src/pages.tsx`, with views in `src/views/*` (hono/jsx).
 - **DB:** better-sqlite3 with raw SQL (`src/db.ts`). The schema matches the old Prisma one, and dates are integer ms. Reads shared by the API and pages
   are in `src/lib/queries.ts`. Saved and hidden URLs are excluded **inside the SQL** (`NOT IN (SELECT url …)`). Keep it there.
@@ -27,7 +28,10 @@ The design is in `documentation/low_level_plan.md` and `documentation/framework_
   Pages carry `data-rendered`. The client revalidates a page that is older than 5 s.
   Pages carry `data-build` (CSS + JS hash) and page/partial responses send `X-Build`. On a mismatch the client drops
   the cached pages and reloads once, so a page cached before a deploy never runs new markup with old JS.
-- **Refresh** is manual only (`POST /api/feed-items/refresh`). rss-parser is imported lazily to keep it off the cold path.
+- **Refresh** is manual only (`POST /api/feed-items/refresh`); REDDIT feeds are skipped. rss-parser is imported lazily to keep it off the cold path.
+- **Reddit (Redlib):** subreddit feeds (sourceKind REDDIT) are never fetched. They render as window cards framing a self-hosted
+  Redlib (`src/redlib.ts`), proxied same-origin for an allowlist of Redlib paths with `frame-ancestors 'self'`. Windows take
+  feed slots 1,3,5,2,4 on a view's first page (`mixSubredditWindows`). `REDLIB_URL` unset turns them off. See spec §7.1.
 
 ## Conventions
 - API errors use `fail(c, message, code, status)` and the `{ error: { message, code } }` envelope. Validate with the Zod schemas in `src/lib/validations.ts`.

@@ -93,6 +93,31 @@ describe('migrate', () => {
     ]);
   });
 
+  it('converts subreddit RSS feeds to REDDIT and deletes their items', () => {
+    const conn = open();
+    migrate(conn);
+    conn.exec(`
+      INSERT INTO "Feed" ("id", "name", "url", "sourceKind", "fetchErrorCount", "updatedAt") VALUES
+        ('sub', 'Listen', 'https://www.reddit.com/r/listentothis/hot.rss', 'RSS', 3, 0),
+        ('rss', 'Blog', 'https://b.example/feed.xml', 'RSS', 0, 0);
+      INSERT INTO "FeedItem" ("id", "feedId", "guid", "title", "link", "publishedAt") VALUES
+        ('i1', 'sub', 'g1', 'T', 'https://www.reddit.com/r/listentothis/comments/abcde/x/', 0),
+        ('i2', 'rss', 'g2', 'T', 'https://b.example/1', 0);
+    `);
+
+    migrate(conn);
+
+    const kinds = () => conn.prepare('SELECT "id", "sourceKind", "fetchErrorCount" FROM "Feed" ORDER BY "id"').all();
+    expect(kinds()).toEqual([
+      { id: 'rss', sourceKind: 'RSS', fetchErrorCount: 0 },
+      { id: 'sub', sourceKind: 'REDDIT', fetchErrorCount: 0 },
+    ]);
+    expect(conn.prepare('SELECT "id" FROM "FeedItem"').all()).toEqual([{ id: 'i2' }]);
+    migrate(conn);
+    expect(kinds()).toHaveLength(2);
+    expect(conn.prepare('SELECT COUNT(*) AS n FROM "FeedItem"').get()).toEqual({ n: 1 });
+  });
+
   it('is idempotent on a fresh DB', () => {
     const conn = open();
     migrate(conn);

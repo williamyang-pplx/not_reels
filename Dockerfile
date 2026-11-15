@@ -29,9 +29,12 @@ COPY --from=build /out/node_modules /app/node_modules
 COPY --from=build /app/package.json /app/package.json
 COPY public /app/public
 COPY data /app/data
+# Redlib (the Reddit windows): one static binary, started on loopback by fly-start.sh.
+COPY --from=ghcr.io/nachtalb/redlib:latest /usr/local/bin/redlib /usr/local/bin/redlib
+COPY scripts/fly-start.sh /app/fly-start.sh
 RUN mkdir -p /data
 VOLUME /data
 ENV DATABASE_URL="file:///data/sqlite.db"
 EXPOSE 3000
 # Migrations run in-process at boot (idempotent CREATE TABLE IF NOT EXISTS).
-CMD ["node", "dist/server.mjs"]
+CMD ["/app/fly-start.sh"]

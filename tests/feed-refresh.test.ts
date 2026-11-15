@@ -1,9 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { refreshSingleFeed, refreshAllFeeds, redditBackgroundPassDone } from '../src/lib/feed-refresh';
+import { refreshSingleFeed, refreshAllFeeds } from '../src/lib/feed-refresh';
 import type { ParsedFeed } from '../src/lib/rss-fetcher';
 import { resetDb, createFeed, itemsOf, itemByGuid, countItems, feedRow } from './helpers';
 import { MAX_ITEMS_PER_FEED } from '../src/lib/constants';
-import { HttpStatusError } from '../src/lib/utils';
 
 function fakeFetcher(items: Array<{ guid?: string; title?: string; link?: string; isoDate?: string }>): () => Promise<ParsedFeed> {
   return async () => ({ title: 'fake', items });
@@ -111,6 +110,14 @@ describe('refreshSingleFeed', () => {
     expect(feedRow(feed.id)?.fetchErrorCount).toBe(2);
     await refreshSingleFeed(feed.id, { fetcher: fakeFetcher([{ guid: 'a', title: 'A', link: 'L' }]) });
     expect(feedRow(feed.id)?.fetchErrorCount).toBe(0);
+  });
+
+  it('returns ok without fetching a REDDIT feed', async () => {
+    const feed = createFeed({ url: 'https://www.reddit.com/r/listentothis/', sourceKind: 'REDDIT' });
+    const fetcher = vi.fn(fakeFetcher([{ guid: 'a', title: 'A', link: 'L' }]));
+    expect(await refreshSingleFeed(feed.id, { fetcher })).toEqual({ newItems: 0, ok: true });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(countItems(feed.id)).toBe(0);
   });
 
   it('returns ok:false when feed does not exist', async () => {
@@ -244,9 +251,21 @@ describe('refreshAllFeeds', () => {
     const b = createFeed({ url: 'https://b.example' });
     const items = [{ guid: 'g', title: 'T', link: 'L', isoDate: '2026-04-14T10:00:00Z' }];
     const result = await refreshAllFeeds({ fetcher: fakeFetcher(items) });
-    expect(result).toEqual({ refreshed: 2, newItems: 2, failed: 0, queued: 0 });
+    expect(result).toEqual({ refreshed: 2, newItems: 2, failed: 0 });
     expect(countItems(a.id)).toBe(1);
     expect(countItems(b.id)).toBe(1);
+  });
+
+  it('skips REDDIT feeds', async () => {
+    const rss = createFeed({ url: 'https://a.example' });
+    const reddit = createFeed({ url: 'https://www.reddit.com/r/listentothis/', sourceKind: 'REDDIT' });
+    const urls: string[] = [];
+    const items = [{ guid: 'g', title: 'T', link: 'L', isoDate: '2026-04-14T10:00:00Z' }];
+    const result = await refreshAllFeeds({ fetcher: async (url) => (urls.push(url), { title: 'fake', items }) });
+    expect(result).toEqual({ refreshed: 1, newItems: 1, failed: 0 });
+    expect(urls).toEqual(['https://a.example']);
+    expect(countItems(rss.id)).toBe(1);
+    expect(countItems(reddit.id)).toBe(0);
   });
 
   it('skips inactive feeds', async () => {
@@ -301,175 +320,9 @@ describe('refreshAllFeeds', () => {
       concurrency: 1,
     });
 
-    expect(result).toEqual({ refreshed: 2, newItems: 2, failed: 0, queued: 0 });
+    expect(result).toEqual({ refreshed: 2, newItems: 2, failed: 0 });
     expect(countItems(rss.id)).toBe(1);
     expect(countItems(local.id)).toBe(1);
   });
 });
 
-describe('subreddit feeds in a full refresh', () => {
-  const post = (sub: string, id: string) => ({
-    guid: `t3_${id}`,
-    title: `${sub} ${id}`,
-    link: `https://www.reddit.com/r/${sub}/comments/${id}/slug/`,
-    isoDate: '2026-04-14T10:00:00Z',
-  });
-
-  it('fetches every subreddit feed of one sort in a single multireddit request', async () => {
-    const music = createFeed({ url: 'https://www.reddit.com/r/listentothis/hot.rss' });
-    const tech = createFeed({ url: 'https://reddit.com/r/unixporn/hot.rss' });
-    const other = createFeed({ url: 'https://other.example/feed.xml' });
-    const urls: string[] = [];
-    const fetcher = async (url: string): Promise<ParsedFeed> => {
-      urls.push(url);
-      if (url.includes('other.example')) return { items: [{ guid: 'o', title: 'O', link: 'https://other.example/o' }] };
-      return {
-        items: [post('unixporn', 'aaaaa'), post('ListenToThis', 'bbbbb'), post('unixporn', 'ccccc'), post('pics', 'ddddd')],
-      };
-    };
-
-    const result = await refreshAllFeeds({ fetcher, redditIntervalMs: 0 });
-
-    expect(result).toEqual({ refreshed: 3, newItems: 4, failed: 0, queued: 0 });
-    expect(urls.filter((u) => u.includes('reddit.com'))).toEqual([
-      'https://www.reddit.com/r/listentothis+unixporn/hot.rss?limit=100',
-    ]);
-    expect(itemsOf(music.id).map((i) => [i.guid, i.sourceRank])).toEqual([['t3_bbbbb', 0]]);
-    expect(itemsOf(tech.id).map((i) => [i.guid, i.sourceRank])).toEqual([
-      ['t3_aaaaa', 0],
-      ['t3_ccccc', 1],
-    ]);
-    expect(countItems(other.id)).toBe(1);
-  });
-
-  it('fetches subreddit feeds with a query string on their own', async () => {
-    createFeed({ url: 'https://www.reddit.com/r/unixporn/top.rss?t=week' });
-    const urls: string[] = [];
-    await refreshAllFeeds({ fetcher: async (url) => (urls.push(url), { items: [] }), redditIntervalMs: 0 });
-    expect(urls).toEqual(['https://www.reddit.com/r/unixporn/top.rss?t=week']);
-  });
-
-  it('counts a failed multireddit request against every feed in it, without pausing them', async () => {
-    const a = createFeed({ url: 'https://www.reddit.com/r/listentothis/hot.rss' });
-    const b = createFeed({ url: 'https://www.reddit.com/r/unixporn/.rss' });
-    const result = await refreshAllFeeds({
-      fetcher: async () => {
-        throw new Error('Status code 429');
-      },
-      redditIntervalMs: 0,
-    });
-    expect(result).toEqual({ refreshed: 0, newItems: 0, failed: 2, queued: 0 });
-    for (const feed of [a, b]) {
-      expect(feedRow(feed.id)).toMatchObject({ fetchErrorCount: 1, isActive: true });
-    }
-  });
-});
-
-describe('subreddit batches beyond the first', () => {
-  const INTERVAL = 40;
-  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-  const subs = Array.from({ length: 10 }, (_, i) => `sub${String(i).padStart(2, '0')}`);
-
-  beforeEach(async () => {
-    await redditBackgroundPassDone();
-    await sleep(INTERVAL + 5); // let the Reddit slot from earlier tests expire
-  });
-
-  function recordingFetcher() {
-    const calls: { url: string; at: number }[] = [];
-    const fetcher = async (url: string): Promise<ParsedFeed> => {
-      calls.push({ url, at: Date.now() });
-      const inUrl = url.match(/\/r\/([^/]+)\//)?.[1].split('+') ?? [];
-      return {
-        items: inUrl.map((sub) => ({
-          guid: `t3_${sub}`,
-          title: sub,
-          link: `https://www.reddit.com/r/${sub}/comments/abcde/x/`,
-        })),
-      };
-    };
-    return { calls, fetcher };
-  }
-
-  it('sends 8 subreddits per request, then the rest in the background after the interval', async () => {
-    const feeds = subs.map((sub) => createFeed({ url: `https://www.reddit.com/r/${sub}/hot.rss` }));
-    const { calls, fetcher } = recordingFetcher();
-
-    const result = await refreshAllFeeds({ fetcher, redditIntervalMs: INTERVAL });
-
-    expect(result).toEqual({ refreshed: 8, newItems: 8, failed: 0, queued: 2 });
-    expect(calls.map((c) => c.url)).toEqual([`https://www.reddit.com/r/${subs.slice(0, 8).join('+')}/hot.rss?limit=100`]);
-    expect(countItems(feeds[9].id)).toBe(0);
-
-    await redditBackgroundPassDone();
-    expect(calls.map((c) => c.url)).toEqual([
-      `https://www.reddit.com/r/${subs.slice(0, 8).join('+')}/hot.rss?limit=100`,
-      `https://www.reddit.com/r/${subs.slice(8).join('+')}/hot.rss?limit=100`,
-    ]);
-    expect(calls[1].at - calls[0].at).toBeGreaterThanOrEqual(INTERVAL - 5);
-    expect(feeds.map((f) => countItems(f.id))).toEqual(subs.map(() => 1));
-  });
-
-  it('retries a batch that got a 429 once, in the background', async () => {
-    const a = createFeed({ url: 'https://www.reddit.com/r/sub00/hot.rss' });
-    const { calls, fetcher } = recordingFetcher();
-    let first = true;
-    const limitedOnce = async (url: string) => {
-      if (first) {
-        first = false;
-        calls.push({ url, at: Date.now() });
-        throw new HttpStatusError(429);
-      }
-      return fetcher(url);
-    };
-
-    const result = await refreshAllFeeds({ fetcher: limitedOnce, redditIntervalMs: INTERVAL });
-    expect(result).toEqual({ refreshed: 0, newItems: 0, failed: 0, queued: 1 });
-
-    await redditBackgroundPassDone();
-    expect(calls).toHaveLength(2);
-    expect(calls[1].at - calls[0].at).toBeGreaterThanOrEqual(INTERVAL - 5);
-    expect(feedRow(a.id)).toMatchObject({ fetchErrorCount: 0 });
-    expect(countItems(a.id)).toBe(1);
-  });
-
-  it('records the failure when the retry gets a 429 too', async () => {
-    const a = createFeed({ url: 'https://www.reddit.com/r/sub00/hot.rss' });
-    let calls = 0;
-    const alwaysLimited = async (): Promise<ParsedFeed> => {
-      calls += 1;
-      throw new HttpStatusError(429);
-    };
-
-    await refreshAllFeeds({ fetcher: alwaysLimited, redditIntervalMs: INTERVAL });
-    await redditBackgroundPassDone();
-
-    expect(calls).toBe(2);
-    expect(feedRow(a.id)).toMatchObject({ fetchErrorCount: 1, isActive: true });
-  });
-
-  it('leaves subreddit feeds to a background pass that is still running', async () => {
-    subs.forEach((sub) => createFeed({ url: `https://www.reddit.com/r/${sub}/hot.rss` }));
-    const { calls, fetcher } = recordingFetcher();
-
-    await refreshAllFeeds({ fetcher, redditIntervalMs: INTERVAL });
-    const second = await refreshAllFeeds({ fetcher, redditIntervalMs: INTERVAL });
-
-    expect(second).toEqual({ refreshed: 0, newItems: 0, failed: 0, queued: 10 });
-    await redditBackgroundPassDone();
-    expect(calls).toHaveLength(2);
-  });
-
-  it('queues every batch when Reddit was called within the interval', async () => {
-    const single = createFeed({ url: 'https://www.reddit.com/r/solo/hot.rss' });
-    const { calls, fetcher } = recordingFetcher();
-    await refreshSingleFeed(single.id, { fetcher, redditIntervalMs: INTERVAL });
-
-    const result = await refreshAllFeeds({ fetcher, redditIntervalMs: INTERVAL });
-
-    expect(result).toEqual({ refreshed: 0, newItems: 0, failed: 0, queued: 1 });
-    await redditBackgroundPassDone();
-    expect(calls).toHaveLength(2);
-    expect(calls[1].at - calls[0].at).toBeGreaterThanOrEqual(INTERVAL - 5);
-  });
-});

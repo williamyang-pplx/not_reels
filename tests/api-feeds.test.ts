@@ -104,6 +104,17 @@ describe('POST /api/feeds', () => {
     expect(body.data.sourceKind).toBe('LOCAL');
   });
 
+  it('creates a subreddit feed as REDDIT', async () => {
+    const res = await json('POST', '/api/feeds', {
+      name: 'r/listentothis',
+      url: 'https://www.reddit.com/r/listentothis/',
+      topics: ['MUSIC'],
+    });
+    const body = await res.json();
+    expect(res.status).toBe(201);
+    expect(body.data.sourceKind).toBe('REDDIT');
+  });
+
   it('rejects duplicate url with 409', async () => {
     createFeed({ url: 'https://dup' });
     const res = await json('POST', '/api/feeds', { name: 'X', url: 'https://dup', topics: ['NEWS'] });

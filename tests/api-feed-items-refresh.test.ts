@@ -17,7 +17,7 @@ describe('POST /api/feed-items/refresh', () => {
     const res = await json('POST', '/api/feed-items/refresh', { feedId: feed.id });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.data).toEqual({ refreshed: 1, newItems: 3, failed: 0, queued: 0 });
+    expect(body.data).toEqual({ refreshed: 1, newItems: 3, failed: 0 });
     expect(refreshSingleFeed).toHaveBeenCalledWith(feed.id);
   });
 

@@ -24,7 +24,7 @@ Do **not** assume that you must keep the current stack (§2.2). Before you write
 - Fly.io: 1 shared CPU, 512MB RAM, `auto_stop_machines` and `min_machines_running = 0`. **Cold start is part of the user's latency.** Measure the time from process start to the first byte.
 - SQLite is a file on the `/data` volume. There is one machine and no edge replicas, so "edge" frameworks don't help with data latency.
 - The main use is an iPhone home-screen PWA on a mobile network. A small JS payload and fast first paint matter more than desktop throughput.
-- You must keep: the YouTube lite embed, the Reddit iframe embed, the CSP (§9.3), the PWA manifest and the Apple meta tags (§9.2).
+- You must keep: the YouTube lite embed, the Redlib Reddit windows (§7.1), the CSP (§9.3), the PWA manifest and the Apple meta tags (§9.2).
 
 **Candidates to evaluate (at minimum):**
 - Next.js (current version), with server components, streaming, and as little client JS as possible.
@@ -77,7 +77,7 @@ model Feed {
   id              String      @id @default(cuid())
   name            String
   url             String      @unique   // http(s) URL or "local/<provider_id>"
-  sourceKind      String      @default("RSS")   // "RSS" | "LOCAL" (inferred from url)
+  sourceKind      String      @default("RSS")   // "RSS" | "LOCAL" | "REDDIT" (inferred from url)
   isActive        Boolean     @default(true)
   fetchErrorCount Int         @default(0)
   lastFetched     DateTime?
@@ -135,7 +135,7 @@ model HiddenLink {
 ### Constants (`lib/constants.ts`)
 | Name | Value |
 |---|---|
-| `FEED_SOURCE_KINDS` | `['RSS','LOCAL']` |
+| `FEED_SOURCE_KINDS` | `['RSS','LOCAL','REDDIT']` |
 | `LOCAL_FEED_PREFIX` | `'local/'` |
 | `DEFAULT_TOPICS` | NEWS/News, MUSIC/Music, LITERATURE/Literature, TECHNOLOGY/Tech, SCIENCE/Science, CULTURE/Culture, POLITICS/Politics, OTHER/Other (in this order) |
 | `PAGE_SIZE_DEFAULT` / `PAGE_SIZE_MAX` | 100 / 100 |
@@ -195,7 +195,7 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
   1. Validate the body.
   2. If the URL exists, return 409 `DUPLICATE` `"Feed URL already exists"`.
   3. If any topic slug is unknown, return 400 `"Unknown topic: X"` or `"Unknown topics: X, Y"`.
-  4. Create the feed with `sourceKind` inferred: `LOCAL` if the URL parses as a local feed URL, else `RSS`. Create the FeedTopic rows.
+  4. Create the feed with `sourceKind` inferred: `LOCAL` if the URL parses as a local feed URL, else `REDDIT` if it is a subreddit listing (§7.1), else `RSS`. Create the FeedTopic rows.
   5. **Run one refresh of this feed synchronously before responding.** It is best-effort; errors are only logged.
   6. Re-read the feed and return 201 with the flattened feed. It reflects `lastFetched` and `fetchErrorCount`.
 - **`PATCH /api/feeds/:id`** `{name?, topics?, isActive?}`:
@@ -226,8 +226,8 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
 - **Item shape:** `{ id, feedId, guid, title, link, summary, author, publishedAt (ISO), feedName, feedUrl, feedTopics: string[] }`.
 
 **`POST /api/feed-items/refresh`** `{feedId?}`
-- With `feedId`: 404 `"Feed not found"` if missing. Otherwise call `refreshSingleFeed`. This runs even if the feed is inactive. Returns `{ refreshed: 0|1, newItems, failed: 0|1, queued: 0 }`.
-- Without `feedId`: call `refreshAllFeeds()` and return `{ refreshed, newItems, failed, queued }`.
+- With `feedId`: 404 `"Feed not found"` if missing. Otherwise call `refreshSingleFeed`. This runs even if the feed is inactive. Returns `{ refreshed: 0|1, newItems, failed: 0|1 }`.
+- Without `feedId`: call `refreshAllFeeds()` and return `{ refreshed, newItems, failed }`.
 
 ### 4.5 Saved links
 - **`GET /api/saved-links?topic=`**: optional topic filter (`ALL` means none). Ordered by `savedAt desc`.
@@ -242,24 +242,14 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
 ## 5. Feed refresh pipeline
 
 ### 5.1 `refreshAllFeeds()`
-1. Load every **active** feed. Refresh each one as in §5.2, with one `p-limit(FETCH_CONCURRENCY=12)` limiter.
-2. **Subreddit feeds are batched.** Reddit allows few unauthenticated RSS requests per IP and answers 429 to the rest. Measured from a residential IP in 2026-11: **1 request per clock minute** on `www.reddit.com` (the window resets at :00, and 429s do not use budget). `.json` returns 403 without OAuth, and `old.reddit.com` redirects to a login page.
-   - A subreddit feed is an RSS feed on a Reddit host whose path is `/r/<sub>.rss`, `/r/<sub>/.rss`, `/r/<sub>/<sort>.rss` or `/r/<sub>/<sort>/.rss`, with no query string. The sort defaults to `hot`.
-   - Subreddit feeds are grouped by sort, then split into batches of at most `SUBREDDITS_PER_REQUEST` (8) unique subreddits. Each batch is one request: `https://www.reddit.com/r/<a>+<b>+…/<sort>.rss?limit=100`. Reddit returns at most 100 entries per request, so the batch size keeps a share for each subreddit.
-   - Each entry goes to the feed whose subreddit (case-insensitive) is in the entry's `/r/<sub>/comments/…` link. Other entries are dropped. `sourceRank` is the index within that feed's entries. Then store as in §5.2 steps 3–6.
-3. **Reddit pacing.** The server records the time of every Reddit request (batches, and single RSS feeds on a Reddit host).
-   - The batches of one refresh run one at a time in a **Reddit pass**, each at least `REDDIT_REQUEST_INTERVAL_MS` (61 s) after the last Reddit request.
-   - If no Reddit request was made in the last 61 s, the first batch runs at once and the HTTP response waits for it. The other batches run in the background.
-   - A batch that gets a **429** goes to the back of the pass, without recording a failure, and is retried once (a freshly started process does not know what budget is left). A second 429, or any other error, records a failure for every feed in the batch (§5.2 step 7).
-   - While a pass runs, a new full refresh does not fetch subreddit feeds. It counts them as queued.
-   - `POST /api/feed-items/refresh {feedId}` and the initial fetch on create still fetch the feed's own URL at once. They do count as the last Reddit request.
-   - The pass lives in process memory. If the machine stops, the queued batches are lost until the next refresh.
-4. For the result: `refreshed` counts successes, `failed` counts failures, `newItems` is the sum of `newItems`, and `queued` is the number of subreddit feeds left to the background pass.
+1. Load every **active** feed that is not `REDDIT`. Refresh each one as in §5.2, with one `p-limit(FETCH_CONCURRENCY=12)` limiter.
+2. **REDDIT feeds are skipped.** A subreddit is shown as a window (§7.1), so there is nothing to fetch.
+3. For the result: `refreshed` counts successes, `failed` counts failures, and `newItems` is the sum of `newItems`.
 
 Make the fetcher, the local provider registry and the concurrency injectable through an options object, so tests can stub them.
 
 ### 5.2 `refreshSingleFeed(feedId)`
-1. Load the feed. If it is missing, return `{newItems:0, ok:false}`.
+1. Load the feed. If it is missing, return `{newItems:0, ok:false}`. If it is `REDDIT`, return `{newItems:0, ok:true}` without touching the row.
 2. Get normalized items:
    - **LOCAL:** parse the provider id from the URL and look up the provider; throw if either is invalid. Call `provider({ feed: {id,name,url,sourceKind}, now })`, then run `normalizeLocalFeedItems` on the result (§5.5).
    - **RSS:** call `fetcher(url)` and normalize all items (§5.4). `sourceRank` is the item's index in the feed.
@@ -295,7 +285,7 @@ Make the fetcher, the local provider registry and the concurrency injectable thr
 - **Registry:** `{ rym_music_recs: rymMusicRecsProvider }`.
 - **Helpers:**
   - `parseLocalFeedUrl(url)` returns the provider id, or null if the URL does not start with `local/` or the id fails `/^[a-z0-9_]+$/`.
-  - `inferFeedSourceKind(url)` returns `LOCAL` or `RSS`.
+  - `inferFeedSourceKind(url)` returns `LOCAL`, `REDDIT` (a subreddit listing, §7.1) or `RSS`.
   - `hasLocalFeedProvider(id)` checks the registry with an own-property check.
   - `getLocalFeedProvider(id)` returns the provider or null.
 - **Provider contract:** `(ctx: { feed, now }) => Promise<Item[]> | Item[]`, where an Item is `{ guid, title, link, summary?, author?, publishedAt?: Date|string|null, sourceRank?: int≥0|null }`.
@@ -376,6 +366,20 @@ This is a pure function, `recommendItems(items, opts)`. Each item has `{id, feed
 - **`truncate(str,max)`:** adds an ellipsis `…`. **`cn(...)`:** joins classes, skipping falsy ones.
 - **Topic color:** a djb2-xor hash of the slug (`h=5381; h = ((h<<5)+h) ^ charCode`), then `hsl(|h|%360, 70%, 60%)`. The card border and the topic badge both use it. With no topic, the border is `hsl(220,10%,40%)`.
 
+### 7.1 Reddit windows (Redlib)
+Reddit ended RSS support on 2026-11-13, and its thread JSON needs a login. Subreddits are therefore shown through a self-hosted [Redlib](https://github.com/Nachtalb/redlib) (`ghcr.io/nachtalb/redlib`), framed in the page.
+- **Subreddit feeds:** a feed whose URL is a subreddit listing on a Reddit host, with no query string, has `sourceKind = REDDIT`. The path is `/r/<sub>`, `/r/<sub>/` or `/r/<sub>/<sort>` (sort: hot, new, rising, top, controversial; default hot), or one of the old RSS forms `/r/<sub>.rss`, `/r/<sub>/.rss`, `/r/<sub>/<sort>.rss`, `/r/<sub>/<sort>/.rss`. At boot, RSS feeds with such URLs become `REDDIT` and their stored items are deleted.
+- **Windows:** each active `REDDIT` feed is a window card (`data-testid="subreddit-window"`): the subreddit name, a `reddit.com ↗` link, and an iframe of `/r/<sub>/<sort>` that is `min(75dvh, 760px)` tall and scrolls on its own. The border and badge use the primary topic.
+  - A window appears under every topic of its feed and under All, oldest feed first, on the **first page** of every sort.
+  - Windows take feed positions 1, 3, 5, then 2, 4. Windows past the fifth follow right after position 5. If the cards run out, the remaining windows follow them. A page with windows but no cards shows the windows, not the empty state.
+- **Thread links:** a card whose link is a reddit.com thread (`extractRedditPost`) frames `/r/<sub>/comments/<id>/<slug>` the same way, below the link area.
+- **Proxy:** `REDLIB_URL` (§10) points at the Redlib container. The server forwards an allowlist of Redlib paths to it on the same origin: `/r/`, `/u/`, `/user/`, `/comments/`, `/duplicates/`, `/search`, `/settings`, `/wiki`, `/w/`, Redlib's media proxies (`/img/`, `/vid/`, `/hls/`, `/preview/`, `/thumb/`, …) and its static files. Our own paths (`/`, `/saved`, `/manage`, `/api/*`, `/_f/*`, public files) are never forwarded.
+  - Response headers: `X-Frame-Options` and `Strict-Transport-Security` are dropped, and Redlib's CSP keeps everything but `frame-ancestors 'none'`, which becomes `frame-ancestors 'self'`.
+  - HTML bodies: an `<a>` with an absolute http(s) href and no target gets `target="_blank"` (most sites refuse to be framed), and `href="/"` (Redlib's logo) becomes `/r/<sub>` of the page, or `/r/popular`.
+  - Headers time out after 20 s; bodies stream with no timeout. Redlib down: 502; `REDLIB_URL` unset: 503 (plain text, `no-store`).
+- **Without `REDLIB_URL`:** a window shows "Reddit windows are off…" instead of the frame, and a thread link is a plain card.
+- **Revalidation:** a view where the user has scrolled or tapped inside a frame is never replaced by a background revalidation, and the launch-time "unchanged since render" check ignores frame `src` attributes.
+
 ## 8. Front end
 
 ### 8.1 Routes
@@ -409,7 +413,7 @@ All pages are `force-dynamic`. The root layout wraps the page in the React Query
 ### 8.3 Feed page (`/`)
 - **Toolbar** (one row):
   - **"Refresh feeds"** button (rounded-full outline). It shows "Refreshing…" and is disabled while pending. It calls `POST /api/feed-items/refresh {}`.
-    - On success, the status text reads `Refreshed N · M new`, or `Refreshed N, M new, F failed` if any feed failed. If `queued > 0` it adds ` · Q Reddit feeds still loading`. Then it invalidates `['feed-items']`.
+    - On success, the status text reads `Refreshed N · M new`, or `Refreshed N, M new, F failed` if any feed failed. Then it invalidates `['feed-items']`.
     - On error, the status text reads `Refresh failed`.
     - The status text clears when a new refresh starts.
   - **Sort segmented control:** **Hot** (`recommended`, the default), **New**, **Random**. This is local component state and is not in the URL.
@@ -427,7 +431,7 @@ All pages are `force-dynamic`. The root layout wraps the page in the React Query
   - The summary. A short one (60 words or fewer) is shown whole, with hard line wraps joined into paragraphs. A longer one shows its **first 60 words** with `…`, and a **More** button below the link area loads the whole text from `GET /_f/summary/:id` (plain text, reflowed into paragraphs) and shows it in place of the excerpt, in a panel just below the link area (so reading it never opens the article). The panel's max-height keeps the card at most **3×** its collapsed height; longer text scrolls inside the panel. The button then reads **Less**, which puts the excerpt back and scrolls the card top into view if it is under the nav. The text is fetched once per item. A failed load leaves the excerpt and sets the label to **Retry**.
 - **Embeds** below the link area:
   - **YouTube:** a lite-youtube embed in an `aspect-video` box with `params="rel=0"` and the play label `Play: <title>`.
-  - **Reddit:** an iframe of `https://www.redditmedia.com/r/<sub>/comments/<id>/<slug>/?ref_source=embed&ref=share&embed=true`, 500px tall, lazy-loaded. Its sandbox is `allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox`.
+  - **Reddit thread:** a Redlib frame of the thread with its comments (§7.1), `min(75dvh, 760px)` tall, started ~300px before it scrolls into view, only when `REDLIB_URL` is set. Its sandbox is `allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox`.
 - **Badges:** the TopicBadge for the first topic.
 - **Actions** (small text buttons):
   - **Save:** shown only if the item has at least one topic. It runs `POST /api/saved-links {url: link, title, topic: feedTopics[0]}`. The label goes "Saving…", then "Saved!", and the button stays disabled after success. On success it invalidates **both** `['feed-items']` and `['saved-links']`.
@@ -475,7 +479,7 @@ An item uses this variant when `feedUrl === 'local/rym_music_recs'` or its guid 
    - Clicking × opens `window.confirm("Delete topic "<label>"? This will also delete all feeds and saved links under this topic.")`. If confirmed, it calls DELETE and invalidates topics, feeds, feed-items and saved-links.
 2. **"+ Add feed"** button. It opens the **Add a feed** modal, which has:
    - Name (required)
-   - URL (text, required, placeholder `https://example.com/rss.xml or local/rym_music_recs`)
+   - URL (text, required, placeholder `https://example.com/rss.xml, https://www.reddit.com/r/sub or local/rym_music_recs`)
    - A **TopicCheckboxList**
    - Buttons: Cancel and "Add feed" ("Adding…" while pending). Submit is disabled until at least one topic is checked, and it validates again on submit ("Pick at least one topic").
    - On success, the form resets, the modal closes and `['feeds']` is invalidated.
@@ -483,7 +487,7 @@ An item uses this variant when `feedUrl === 'local/rym_music_recs'` or its guid 
    - A TopicBadge for **every** topic, and a red uppercase `paused` tag when the feed is inactive.
    - The name, and the URL (muted, `break-all`).
    - Buttons:
-     - **Refresh:** `POST /api/feed-items/refresh {feedId}`. It is disabled when the feed is paused, and it invalidates nothing.
+     - **Refresh:** `POST /api/feed-items/refresh {feedId}`. It is disabled when the feed is paused or is a `REDDIT` feed, and it invalidates nothing.
      - **Pause/Resume:** PATCH `isActive`, then invalidate feeds and feed-items.
      - **Edit:** opens the **Edit topics** modal. It shows the feed name, a TopicCheckboxList pre-filled with the feed's topics, and Save. At least one topic is required. Save runs PATCH `topics`, then invalidates feeds and feed-items.
      - **Delete:** red, **no confirm**. Runs DELETE, then invalidates feeds.
@@ -498,7 +502,7 @@ An item uses this variant when `feedUrl === 'local/rym_music_recs'` or its guid 
 ### 8.9 Test IDs (keep them for test parity)
 - Layout and nav: `nav-bar`, `nav-manage-link`, `type-filter-row`, `type-pill-{FEED|SAVED}`, `topic-filter-row`, `topic-pill-{slug|ALL}`.
 - Feed page: `feed-list`, `refresh-button`, `refresh-status`, `sort-{recommended|new|random}`, `sentinel`, `empty-state`.
-- Feed cards: `feed-card`, `save-feed-item-btn`, `hide-feed-item-btn`, `archive-feed-item-btn`, `youtube-music-feed-item-link`.
+- Feed cards: `feed-card`, `subreddit-window`, `save-feed-item-btn`, `hide-feed-item-btn`, `archive-feed-item-btn`, `youtube-music-feed-item-link`.
 - Saved page: `saved-link-card`, `saved-link-delete`, `add-saved-link-btn`, `add-saved-link-modal`.
 - Manage page: `add-feed-btn`, `add-feed-modal`, `edit-feed-modal`, `feed-row`, `feed-pause-btn`, `feed-edit-btn`, `feed-delete-btn`, `topics-manager`, `topic-input`, `add-topic-btn`, `topic-chip`, `move-topic-left-{slug}`, `move-topic-right-{slug}`, `delete-topic-{slug}`, `topic-checkbox-{slug}`.
 
@@ -530,7 +534,7 @@ Global CSS:
 - **Viewport:** `themeColor #0a0a0a`, `width=device-width`, `initialScale 1`, `viewportFit cover`.
 - **`public/manifest.json`:** name and short_name `not-reels`, `start_url /`, `display standalone`, background and theme color `#0a0a0a`, `orientation portrait`. Icons: 192, 512, and 512 maskable.
 
-### 9.3 Content-Security-Policy (set on every path through `next.config.js` `headers()`)
+### 9.3 Content-Security-Policy (set on every response that has none; proxied Redlib pages keep Redlib's own, with `frame-ancestors 'self'` (§7.1))
 ```
 default-src 'self';
 script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://cdn.jsdelivr.net;
@@ -538,13 +542,15 @@ style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
 img-src 'self' data: https: blob:;
 font-src 'self' data:;
 connect-src 'self';
-frame-src https://www.youtube.com https://www.youtube-nocookie.com https://www.redditmedia.com https://embed.reddit.com;
+frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com;
+frame-ancestors 'none';
 media-src 'self' https:
 ```
 
 ## 10. Environment
 - `DATABASE_URL`: `file:./dev.db` locally (relative to `prisma/`). In production it is `file:///data/sqlite.db`.
 - `RYM_MUSIC_RECS_DB_PATH` and `RYM_MUSIC_RECS_PREFS_PATH`: optional overrides.
+- `REDLIB_URL`: optional base URL of the Redlib container (e.g. `http://127.0.0.1:8180`). Unset turns Reddit windows off (§7.1).
 - The `sqlite3` CLI must be on `PATH` (the RYM provider needs it).
 - Scripts:
   - `dev`: `next dev`
@@ -562,6 +568,7 @@ media-src 'self' https:
   - The build stage installs the build tools and `openssl`, runs `pnpm install --frozen-lockfile --prod=false` and `prisma generate`, copies the source, runs `next build --experimental-build-mode compile`, then `pnpm prune --prod`.
   - The runtime stage installs `ca-certificates`, `openssl` and **`sqlite3`**. It creates the `/data` volume, sets `DATABASE_URL=file:///data/sqlite.db` and `EXPOSE 3000`, and runs `CMD pnpm run start`.
 - **`docker-entrypoint.js`:** if the command is `pnpm run start`, it first runs `pnpm exec prisma migrate deploy`, then runs the command.
+- **Redlib (§7.1):** the runtime stage copies `/usr/local/bin/redlib` from `ghcr.io/nachtalb/redlib:latest`. The command is `scripts/fly-start.sh`, which runs `redlib -a 127.0.0.1 -p 8080` in a restart loop and then `exec node dist/server.mjs`. `fly.toml` `[env]` sets `REDLIB_URL=http://127.0.0.1:8080` and Redlib's `REDLIB_DEFAULT_*` settings; a session cookie, if ever needed, goes in `fly secrets` as `REDLIB_REDDIT_COOKIE`.
 - **`.dockerignore`:** `node_modules`, `.next`, `.env*`, logs, `prisma/dev.db*`, `prisma/test.db*`, `coverage`. Note that `data/rym_data.db` **is** included in the image.
 - **`fly.toml`:**
   - App `not-reels`, region `ams`.
@@ -583,11 +590,12 @@ Write Vitest suites with the same coverage as these existing files:
   - Marks stale items with rank 10000.
   - Prunes to 30, and RYM to one batch of 30.
   - Increments the error count and never deactivates the feed.
-  - Batches subreddit feeds into multireddit requests of 8 subreddits and splits the entries back.
-  - Runs batches after the first in the background, 61 s apart, retries a 429 once, and does not start a second pass.
+  - Skips `REDDIT` feeds, and a single `REDDIT` refresh is ok without fetching.
   - Resets the error count on success.
   - Skips inactive feeds.
   - Local provider items flow through.
+- `reddit-feeds`: subreddit URL forms, the Redlib paths, and window placement.
+- `redlib`: the proxy (forwarding, header rewrite, cookies, media, 304, 502/503, compression, our paths never forwarded) and the HTML rewrite.
 - `rym-music-recs`: weighting, excluding existing guids, the summary and link format, and the env path overrides. Use a temp sqlite DB and a temp prefs file.
 - API suites. Call the handlers in-process, without a network server. The current code imports Next route handlers and passes them `Request` objects; use the closest equivalent in the framework you choose:
   - feeds: CRUD, duplicate URL 409, unknown topics, the initial fetch on create, replacing topics.
@@ -599,7 +607,7 @@ Write Vitest suites with the same coverage as these existing files:
 ## 13. Known quirks (copy them as they are unless told otherwise)
 - The confirm text for deleting a topic says it "will also delete all feeds". In fact the server **refuses** with 409 if any feed would be left with no topic. It deletes only saved links that have that topic.
 - The "primary topic" of an item (used for Save, the border color, the badge and topic balance) is the first FeedTopic row, which means the lowest slug alphabetically. It is not the first topic the user selected.
-- Hot and Random never page (`nextCursor: null`), so you see at most 100 items.
+- Hot and Random never page (`nextCursor: null`), so you see at most 100 items, plus the subreddit windows. On New, windows are only on the first page.
 - Feed-row Refresh on Manage does not invalidate any query. The UI does not show the result.
 - Hiding an item does not invalidate `['saved-links']`. Saving invalidates both.
 - There is no UI to edit saved links or to unhide hidden links, but the APIs exist.

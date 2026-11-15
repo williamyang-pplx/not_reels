@@ -15,6 +15,9 @@ const cache = new Map<string, Entry>();
 let sort: Sort = (app.querySelector<HTMLElement>('[data-current-sort]')?.dataset.currentSort as Sort) || 'recommended';
 let refreshStatus: string | null = null;
 let navToken = 0;
+// Set once the user scrolls or taps inside a Redlib frame of the current view, so background revalidation never
+// reloads a window they are reading. The frames are same-origin, so the page can listen inside them.
+let frameTouched = false;
 
 const $ = <T extends Element = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector<T>(sel);
 const $$ = <T extends Element = HTMLElement>(sel: string, root: ParentNode = document) =>
@@ -139,6 +142,7 @@ function prefetch(href: string) {
 function swap(html: string, scroll: number | null) {
   const rows = $$('.pill-row').map((r) => r.scrollLeft);
   app.innerHTML = html;
+  frameTouched = false;
   document.documentElement.style.overflow = ''; // a modal open in the old view held the scroll lock
   $$('.pill-row').forEach((r, i) => (r.scrollLeft = rows[i] ?? 0));
   if (scroll !== null) window.scrollTo(0, scroll);
@@ -177,7 +181,7 @@ async function navigate(href: string, opts: { push?: boolean; scroll?: number | 
     const seen = mutations;
     load(key, true)
       .then((html) => {
-        if (token === navToken && seen === mutations && html !== hit.html && window.scrollY < 40 && sort !== 'random') {
+        if (token === navToken && seen === mutations && html !== hit.html && window.scrollY < 40 && sort !== 'random' && !frameTouched) {
           swap(html, null);
         }
       })
@@ -213,7 +217,28 @@ function emptyState(message: string) {
 
 let observer: IntersectionObserver | null = null;
 
-// Reddit embeds pull in a lot of third-party JS, so start each one only when its card is
+/** Load a frame, and note when the user scrolls or taps inside it (see frameTouched). */
+function startFrame(f: HTMLIFrameElement) {
+  f.addEventListener('load', () => {
+    const touched = () => {
+      if (f.isConnected) frameTouched = true;
+    };
+    try {
+      f.contentWindow?.addEventListener('pointerdown', touched, { passive: true });
+      f.contentWindow?.addEventListener('scroll', touched, { passive: true });
+    } catch {
+      // Not same-origin (an error page from elsewhere): nothing to watch.
+    }
+  });
+  f.src = f.dataset.src!;
+}
+
+/** The view's markup without frame src attributes, which change as frames start loading. */
+function snapshot(): string {
+  return app.innerHTML.replace(/(<iframe\b[^>]*?) src="[^"]*"/g, '$1');
+}
+
+// Redlib frames (subreddit windows and thread embeds) load a lot, so start each one only when its card is
 // about to scroll into view (the browser's own lazy-loading starts them 1250-2500px early).
 const frameObserver =
   'IntersectionObserver' in window
@@ -222,7 +247,7 @@ const frameObserver =
           for (const e of entries) {
             if (!e.isIntersecting) continue;
             const f = e.target as HTMLIFrameElement;
-            f.src = f.dataset.src!;
+            startFrame(f);
             frameObserver!.unobserve(f);
           }
         },
@@ -233,7 +258,7 @@ const frameObserver =
 function hydrate() {
   for (const f of $$<HTMLIFrameElement>('iframe[data-src]:not([src])')) {
     if (frameObserver) frameObserver.observe(f);
-    else f.src = f.dataset.src!;
+    else startFrame(f);
   }
   const status = $('[data-testid="refresh-status"]');
   if (status && refreshStatus) {
@@ -314,13 +339,16 @@ function detachCard(card: HTMLElement): Comment {
 }
 
 /**
- * After cards are gone for good: re-render if the list is now empty. The view's cache entry was
+ * After cards are gone for good: re-render if the list is now empty (a list still holding subreddit
+ * windows is not). The view's cache entry was
  * already dropped by invalidate(); it isn't re-snapshotted, since the DOM may hold live iframes
  * or belong to a view the user has since navigated away from.
  */
 function settleList(markers: Comment[], token: number) {
   markers.forEach((m) => m.remove());
-  if (token === navToken && !$('[data-testid="feed-card"],[data-testid="saved-link-card"]', app)) void reload();
+  if (token === navToken && !$('[data-testid="feed-card"],[data-testid="saved-link-card"],[data-testid="subreddit-window"]', app)) {
+    void reload();
+  }
 }
 
 /**
@@ -430,14 +458,13 @@ async function refreshAll(btn: HTMLButtonElement) {
   btn.disabled = true;
   btn.textContent = 'Refreshing…';
   try {
-    const r = await api<{ refreshed: number; newItems: number; failed: number; queued: number }>(
+    const r = await api<{ refreshed: number; newItems: number; failed: number }>(
       'POST',
       '/api/feed-items/refresh',
       {},
     );
     refreshStatus =
       r.failed > 0 ? `Refreshed ${r.refreshed}, ${r.newItems} new, ${r.failed} failed` : `Refreshed ${r.refreshed} · ${r.newItems} new`;
-    if (r.queued > 0) refreshStatus += ` · ${r.queued} Reddit feeds still loading`;
     invalidate('feed');
     await reload();
   } catch {
@@ -762,12 +789,13 @@ cache.set(bootKey, { html: app.innerHTML, at: renderedAt });
 hydrate();
 
 // Served from the service worker's page cache: show it, then swap in fresh HTML unless the
-// user has already started scrolling.
+// user has already started scrolling (the page, or inside a frame) or changed anything. Frames
+// starting to load are not a change, hence snapshot().
 if (Date.now() - renderedAt > 5_000) {
-  const before = app.innerHTML;
+  const before = snapshot();
   load(bootKey, true)
     .then((html) => {
-      if (app.innerHTML === before && window.scrollY < 40) swap(html, null);
+      if (snapshot() === before && window.scrollY < 40 && !frameTouched) swap(html, null);
     })
     .catch(() => {});
 }

@@ -1,6 +1,6 @@
 import type { FeedSourceKind } from './types';
 
-export const FEED_SOURCE_KINDS = ['RSS', 'LOCAL'] as const satisfies readonly FeedSourceKind[];
+export const FEED_SOURCE_KINDS = ['RSS', 'LOCAL', 'REDDIT'] as const satisfies readonly FeedSourceKind[];
 
 export const LOCAL_FEED_PREFIX = 'local/';
 

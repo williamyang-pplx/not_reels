@@ -1,4 +1,5 @@
 import { LOCAL_FEED_PREFIX } from '../constants';
+import { parseSubredditFeedUrl } from '../reddit-feeds';
 import type { FeedSourceKind } from '../types';
 import { rymMusicRecsProvider } from './rym-music-recs';
 import type { LocalFeedProvider } from './types';
@@ -19,7 +20,8 @@ export function parseLocalFeedUrl(url: string): string | null {
 }
 
 export function inferFeedSourceKind(url: string): FeedSourceKind {
-  return parseLocalFeedUrl(url) ? 'LOCAL' : 'RSS';
+  if (parseLocalFeedUrl(url)) return 'LOCAL';
+  return parseSubredditFeedUrl(url) ? 'REDDIT' : 'RSS';
 }
 
 export function hasLocalFeedProvider(

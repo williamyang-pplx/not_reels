@@ -1,5 +1,6 @@
 import { getDb, bool, toDate } from '../db';
 import { RELEVANT_FETCH_SIZE } from './constants';
+import { parseSubredditFeedUrl, redlibSubredditPath } from './reddit-feeds';
 import { recommendItems } from './recommendation';
 import type { Feed, FeedItem, SavedLink, SortOrder } from './types';
 
@@ -74,6 +75,27 @@ export function getFeed(id: string): FeedDTO | null {
   const row = getDb().prepare('SELECT * FROM "Feed" WHERE "id" = ?').get(id) as FeedRow | undefined;
   if (!row) return null;
   return mapFeed(row, topicsByFeed([id]).get(id) ?? []);
+}
+
+// ---------- subreddit windows ----------
+
+export interface SubredditWindowDTO {
+  subreddit: string;
+  /** Same-origin Redlib path the window frames, e.g. /r/listentothis/hot. */
+  path: string;
+  /** Topic slugs in FeedTopic PK order; [0] is the primary topic (border color, badge). */
+  topics: string[];
+}
+
+/** Active REDDIT feeds in a topic (or every one for ALL/undefined), oldest feed first. */
+export function listSubredditWindows(topic?: string): SubredditWindowDTO[] {
+  const windows: SubredditWindowDTO[] = [];
+  for (const feed of listFeeds({ topic }).reverse()) {
+    if (feed.sourceKind !== 'REDDIT' || !feed.isActive) continue;
+    const parsed = parseSubredditFeedUrl(feed.url);
+    if (parsed) windows.push({ subreddit: parsed.subreddit, path: redlibSubredditPath(parsed), topics: feed.topics });
+  }
+  return windows;
 }
 
 // ---------- feed items ----------

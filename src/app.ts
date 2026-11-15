@@ -9,7 +9,9 @@ import { feedItemsApi } from './api/feed-items';
 import { savedLinksApi } from './api/saved-links';
 import { hiddenLinksApi } from './api/hidden-links';
 import { pagesRouter } from './pages';
+import { redlibProxy } from './redlib';
 
+/** Set on every response that has none. Proxied Redlib pages keep Redlib's own CSP (with frame-ancestors 'self'). */
 export const CSP = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://cdn.jsdelivr.net",
@@ -17,7 +19,9 @@ export const CSP = [
   "img-src 'self' data: https: blob:",
   "font-src 'self' data:",
   "connect-src 'self'",
-  'frame-src https://www.youtube.com https://www.youtube-nocookie.com https://www.redditmedia.com https://embed.reddit.com',
+  "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com",
+  // Nothing frames our pages, so a link inside a Redlib window that reaches one of them can't nest the app.
+  "frame-ancestors 'none'",
   "media-src 'self' https:",
 ].join('; ');
 
@@ -139,10 +143,12 @@ export function createApp(opts: { staticRoots?: string[] } = {}): Hono {
 
   app.use('*', async (c, next) => {
     await next();
-    c.res.headers.set('Content-Security-Policy', CSP);
+    if (!c.res.headers.has('Content-Security-Policy')) c.res.headers.set('Content-Security-Policy', CSP);
   });
   app.use('*', staticFiles(roots));
   app.use('*', compress);
+  // After compress, so Redlib's HTML, CSS and JS are compressed too; non-Redlib paths fall through.
+  app.use('*', redlibProxy);
 
   app.use('/api/*', async (c, next) => {
     await next();

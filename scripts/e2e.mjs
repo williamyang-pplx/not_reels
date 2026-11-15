@@ -18,8 +18,12 @@ const rows = Array.from({ length: 120 }, (_, i) =>
   `('e2e-item-${i}','e2e-feed','g${i}','Synthetic item ${i}','https://example.com/e2e/${i}',${now - (i + 1) * 3600_000},${i},${now})`);
 // The flows below use the NEWS and TECHNOLOGY topics; make sure the copy has them whatever the source DB holds.
 execFileSync('sqlite3', [db, `INSERT OR IGNORE INTO Topic (slug,label) VALUES ('NEWS','News'),('TECHNOLOGY','Technology');`]);
-execFileSync('sqlite3', [db, `INSERT INTO Feed (id,name,url,sourceKind,isActive,fetchErrorCount,createdAt,updatedAt) VALUES ('e2e-feed','Synthetic','https://example.invalid/feed.xml','RSS',1,0,${now},${now});
+// The copy's own subreddit feeds are dropped, so the window checks see only the synthetic one (under NEWS).
+execFileSync('sqlite3', [db, `PRAGMA foreign_keys = ON; DELETE FROM Feed WHERE sourceKind = 'REDDIT';
+INSERT INTO Feed (id,name,url,sourceKind,isActive,fetchErrorCount,createdAt,updatedAt) VALUES ('e2e-feed','Synthetic','https://example.invalid/feed.xml','RSS',1,0,${now},${now});
 INSERT INTO FeedTopic VALUES ('e2e-feed','TECHNOLOGY');
+INSERT INTO Feed (id,name,url,sourceKind,isActive,fetchErrorCount,createdAt,updatedAt) VALUES ('e2e-reddit','r/listentothis','https://www.reddit.com/r/listentothis/','REDDIT',1,0,${now},${now});
+INSERT INTO FeedTopic VALUES ('e2e-reddit','NEWS');
 INSERT INTO FeedItem (id,feedId,guid,title,link,publishedAt,sourceRank,fetchedAt) VALUES ${rows.join(',')};`]);
 // An item a minute in the future, so it is first under New whatever the DB holds, with a summary past the card's excerpt.
 const LONG = Array.from({ length: 1500 }, (_, i) => `word${i}`).join(' '); // far more than 3 cards' worth
@@ -225,6 +229,22 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.style.overflow), '');
   assert.equal(await page.evaluate(() => document.getElementById('bar').className === 'on'), false);
   ok('back with modal open releases scroll lock; no stuck progress bar');
+
+  // A subreddit window is the first entry under its topic, and absent elsewhere. With Redlib running
+  // (REDLIB_URL set), its frame lists posts, and a post opens in the frame with its comments.
+  await page.goto(base + '/?topic=NEWS', { waitUntil: 'load' }); // a live frame never reaches networkidle
+  assert.equal(await page.$eval('.feed-items > article', (a) => a.dataset.testid), 'subreddit-window');
+  assert.match(await page.textContent('[data-testid=subreddit-window] .meta b'), /r\/listentothis/);
+  if (process.env.REDLIB_URL) {
+    await page.waitForSelector('[data-testid=subreddit-window] iframe[src="/r/listentothis/hot"]');
+    const frame = page.frameLocator('[data-testid=subreddit-window] iframe');
+    await frame.locator('.post').first().waitFor({ timeout: 30_000 });
+    await frame.locator('.post_title a[href*="/comments/"]').first().click();
+    await frame.locator('.comment').first().waitFor({ timeout: 30_000 });
+  }
+  await page.goto(base + '/?topic=TECHNOLOGY', { waitUntil: 'load' });
+  assert.equal(await count('[data-testid=subreddit-window]'), 0);
+  ok(process.env.REDLIB_URL ? 'subreddit window: posts, then a thread with comments' : 'subreddit window placement (no REDLIB_URL)');
 
   assert.deepEqual(errors, []);
   ok('no page errors');

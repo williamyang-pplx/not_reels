@@ -1,4 +1,5 @@
-export type FeedSourceKind = 'RSS' | 'LOCAL';
+/** REDDIT: a subreddit shown as a Redlib window (src/redlib.ts), never fetched. */
+export type FeedSourceKind = 'RSS' | 'LOCAL' | 'REDDIT';
 
 export type Topic = string;
 
