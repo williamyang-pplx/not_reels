@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { parseSubredditFeedUrl } from './lib/reddit-feeds';
+import { parseLegacySubredditRssUrl, parseSubredditFeedUrl, subredditFeedUrl } from './lib/reddit-feeds';
 
 export type DB = Database.Database;
 
@@ -132,22 +132,44 @@ UPDATE "Topic" SET "position" = (SELECT p FROM r WHERE r."slug" = "Topic"."slug"
 }
 
 /**
- * Turn RSS feeds that are subreddit listings into REDDIT feeds (shown as Redlib windows) and delete their stored
- * items. Runs at every boot; once converted no RSS feed matches, so later runs are a no-op.
+ * Turn subreddit feeds into REDDIT feeds (shown as Redlib windows) stored under their page URL
+ * (https://www.reddit.com/r/<sub>/), whether they were RSS feeds or REDDIT feeds still holding an old .rss URL.
+ * Their stored items are deleted. A feed whose page URL another feed already has is folded into that one (oldest
+ * kept, topics merged). Runs at every boot; once every subreddit feed is converted it is a no-op.
  */
 function convertSubredditFeeds(conn: DB): void {
-  const rows = conn.prepare(`SELECT "id", "url" FROM "Feed" WHERE "sourceKind" = 'RSS'`).all() as { id: string; url: string }[];
-  const ids = rows.filter((r) => parseSubredditFeedUrl(r.url)).map((r) => r.id);
-  if (ids.length === 0) return;
+  const rows = conn
+    .prepare(`SELECT "id", "url", "sourceKind" FROM "Feed" WHERE "sourceKind" IN ('RSS', 'REDDIT') ORDER BY "createdAt", rowid`)
+    .all() as { id: string; url: string; sourceKind: string }[];
+  const changes = rows.flatMap((row) => {
+    const sub = parseSubredditFeedUrl(row.url) ?? parseLegacySubredditRssUrl(row.url);
+    if (!sub) return [];
+    const url = subredditFeedUrl(sub);
+    return row.sourceKind === 'REDDIT' && row.url === url ? [] : [{ id: row.id, url }];
+  });
+  if (changes.length === 0) return;
+  const owner = conn.prepare('SELECT "id" FROM "Feed" WHERE "url" = ? AND "id" != ?');
+  const mergeTopics = conn.prepare(
+    'INSERT OR IGNORE INTO "FeedTopic" ("feedId", "topicSlug") SELECT ?, "topicSlug" FROM "FeedTopic" WHERE "feedId" = ?',
+  );
   const convert = conn.prepare(
-    `UPDATE "Feed" SET "sourceKind" = 'REDDIT', "fetchErrorCount" = 0, "updatedAt" = ? WHERE "id" = ?`,
+    `UPDATE "Feed" SET "sourceKind" = 'REDDIT', "url" = ?, "fetchErrorCount" = 0, "updatedAt" = ? WHERE "id" = ?`,
   );
   const dropItems = conn.prepare('DELETE FROM "FeedItem" WHERE "feedId" = ?');
+  const dropTopics = conn.prepare('DELETE FROM "FeedTopic" WHERE "feedId" = ?');
+  const dropFeed = conn.prepare('DELETE FROM "Feed" WHERE "id" = ?');
   conn.transaction(() => {
     const now = Date.now();
-    for (const id of ids) {
-      convert.run(now, id);
+    for (const { id, url } of changes) {
       dropItems.run(id);
+      const kept = owner.get(url, id) as { id: string } | undefined;
+      if (!kept) {
+        convert.run(url, now, id);
+        continue;
+      }
+      mergeTopics.run(kept.id, id);
+      dropTopics.run(id);
+      dropFeed.run(id);
     }
   })();
 }

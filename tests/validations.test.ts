@@ -16,6 +16,27 @@ describe('validations', () => {
     expect(r.success).toBe(true);
   });
 
+  it('stores a subreddit page URL in one form', () => {
+    for (const url of ['https://reddit.com/r/ListenToThis', 'https://old.reddit.com/r/listentothis/', 'https://www.reddit.com/r/listentothis/hot']) {
+      const r = CreateFeedSchema.safeParse({ name: 'L', url, topics: ['MUSIC'] });
+      expect(r.success && r.data.url, url).toBe('https://www.reddit.com/r/listentothis/');
+    }
+  });
+
+  it('rejects Reddit URLs that are not subreddit pages, RSS feeds included', () => {
+    for (const url of [
+      'https://www.reddit.com/r/listentothis/hot.rss',
+      'https://www.reddit.com/r/listentothis/.rss',
+      'https://www.reddit.com/r/a+b/',
+      'https://www.reddit.com/user/someone/',
+      'https://www.reddit.com/r/listentothis/comments/abc12/x/',
+    ]) {
+      const r = CreateFeedSchema.safeParse({ name: 'L', url, topics: ['MUSIC'] });
+      expect(r.success, url).toBe(false);
+      if (!r.success) expect(r.error.issues[0].message).toContain('subreddit URL');
+    }
+  });
+
   it('rejects invalid url', () => {
     const r = CreateFeedSchema.safeParse({
       name: 'X',

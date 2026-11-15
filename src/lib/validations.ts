@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { LOCAL_FEED_PREFIX } from './constants';
+import { detectEmbedKind } from './embed';
 import { hasLocalFeedProvider, parseLocalFeedUrl } from './local-feeds/registry';
+import { parseSubredditFeedUrl, subredditFeedUrl } from './reddit-feeds';
 
 export const FeedUrlSchema = z
   .string()
@@ -30,7 +32,21 @@ export const FeedUrlSchema = z
         code: z.ZodIssueCode.custom,
         message: 'Invalid feed URL',
       });
+      return;
     }
+
+    // Reddit is read through Redlib windows: only a subreddit page works (its RSS feeds were shut down).
+    if (detectEmbedKind(value) === 'reddit' && !parseSubredditFeedUrl(value)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Reddit feeds must be a subreddit URL, like https://www.reddit.com/r/listentothis/',
+      });
+    }
+  })
+  // One stored form per subreddit, so the duplicate check catches reddit.com/r/X vs www.reddit.com/r/x/.
+  .transform((value) => {
+    const sub = parseSubredditFeedUrl(value);
+    return sub ? subredditFeedUrl(sub) : value;
   });
 export const TopicSchema = z
   .string()

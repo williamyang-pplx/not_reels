@@ -13,12 +13,12 @@ export interface SubredditFeed {
   sort: string;
 }
 
-// The page a user pastes (/r/<sub>, /r/<sub>/, /r/<sub>/<sort>) and the old RSS forms (/r/<sub>.rss,
-// /r/<sub>/.rss, /r/<sub>/<sort>.rss, /r/<sub>/<sort>/.rss).
-const SUBREDDIT_PATH = /^\/r\/([A-Za-z0-9_]{2,21})(?:\/(hot|new|rising|top|controversial))?\/?(?:\.rss)?$/i;
+// A subreddit page: /r/<sub>, /r/<sub>/, /r/<sub>/<sort>, /r/<sub>/<sort>/.
+const SUBREDDIT_PAGE_PATH = /^\/r\/([A-Za-z0-9_]{2,21})(?:\/(hot|new|rising|top|controversial))?\/?$/i;
+// Its old RSS feed: /r/<sub>.rss, /r/<sub>/.rss, /r/<sub>/<sort>.rss, /r/<sub>/<sort>/.rss.
+const SUBREDDIT_RSS_PATH = /^\/r\/([A-Za-z0-9_]{2,21})(?:\/(hot|new|rising|top|controversial))?\/?\.rss$/i;
 
-/** A subreddit listing URL (page or RSS) on a Reddit host with no query string, or null if the URL is anything else. */
-export function parseSubredditFeedUrl(feedUrl: string): SubredditFeed | null {
+function parseSubredditPath(feedUrl: string, path: RegExp): SubredditFeed | null {
   let url: URL;
   try {
     url = new URL(feedUrl);
@@ -26,9 +26,24 @@ export function parseSubredditFeedUrl(feedUrl: string): SubredditFeed | null {
     return null;
   }
   if (!REDDIT_HOSTS.has(url.hostname.toLowerCase()) || url.search) return null;
-  const match = SUBREDDIT_PATH.exec(url.pathname);
+  const match = path.exec(url.pathname);
   if (!match) return null;
   return { subreddit: match[1].toLowerCase(), sort: (match[2] ?? 'hot').toLowerCase() };
+}
+
+/** A subreddit page URL on a Reddit host with no query string, or null if the URL is anything else. */
+export function parseSubredditFeedUrl(feedUrl: string): SubredditFeed | null {
+  return parseSubredditPath(feedUrl, SUBREDDIT_PAGE_PATH);
+}
+
+/** A subreddit's old RSS feed URL, or null. Only the boot migration reads these; new feeds must be page URLs. */
+export function parseLegacySubredditRssUrl(feedUrl: string): SubredditFeed | null {
+  return parseSubredditPath(feedUrl, SUBREDDIT_RSS_PATH);
+}
+
+/** The one stored form of a subreddit feed's URL: https://www.reddit.com/r/<sub>/, with /<sort>/ unless hot. */
+export function subredditFeedUrl(feed: SubredditFeed): string {
+  return feed.sort === 'hot' ? `https://www.reddit.com/r/${feed.subreddit}/` : `https://www.reddit.com/r/${feed.subreddit}/${feed.sort}/`;
 }
 
 /** Same-origin path of the Redlib page for a subreddit feed, e.g. /r/listentothis/hot. */

@@ -195,7 +195,7 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
   1. Validate the body.
   2. If the URL exists, return 409 `DUPLICATE` `"Feed URL already exists"`.
   3. If any topic slug is unknown, return 400 `"Unknown topic: X"` or `"Unknown topics: X, Y"`.
-  4. Create the feed with `sourceKind` inferred: `LOCAL` if the URL parses as a local feed URL, else `REDDIT` if it is a subreddit listing (§7.1), else `RSS`. Create the FeedTopic rows.
+  4. Create the feed with `sourceKind` inferred: `LOCAL` if the URL parses as a local feed URL, else `REDDIT` if it is a subreddit page (§7.1; the stored URL is its canonical page URL), else `RSS`. Create the FeedTopic rows.
   5. **Run one refresh of this feed synchronously before responding.** It is best-effort; errors are only logged.
   6. Re-read the feed and return 201 with the flattened feed. It reflects `lastFetched` and `fetchErrorCount`.
 - **`PATCH /api/feeds/:id`** `{name?, topics?, isActive?}`:
@@ -368,7 +368,7 @@ This is a pure function, `recommendItems(items, opts)`. Each item has `{id, feed
 
 ### 7.1 Reddit windows (Redlib)
 Reddit ended RSS support on 2026-11-13, and its thread JSON needs a login. Subreddits are therefore shown through a self-hosted [Redlib](https://github.com/Nachtalb/redlib) (`ghcr.io/nachtalb/redlib`), framed in the page.
-- **Subreddit feeds:** a feed whose URL is a subreddit listing on a Reddit host, with no query string, has `sourceKind = REDDIT`. The path is `/r/<sub>`, `/r/<sub>/` or `/r/<sub>/<sort>` (sort: hot, new, rising, top, controversial; default hot), or one of the old RSS forms `/r/<sub>.rss`, `/r/<sub>/.rss`, `/r/<sub>/<sort>.rss`, `/r/<sub>/<sort>/.rss`. At boot, RSS feeds with such URLs become `REDDIT` and their stored items are deleted.
+- **Subreddit feeds:** a feed whose URL is a subreddit page on a Reddit host, with no query string, has `sourceKind = REDDIT`. The path is `/r/<sub>`, `/r/<sub>/` or `/r/<sub>/<sort>` (sort: hot, new, rising, top, controversial; default hot). The URL is stored as `https://www.reddit.com/r/<sub>/` (lowercase, `/<sort>/` added unless hot), so every form of one subreddit is the same feed (409 on a second one). Any other Reddit URL, the old subreddit RSS feeds (`.rss`) included, is rejected with 400 `Reddit feeds must be a subreddit URL, like https://www.reddit.com/r/listentothis/`. At boot, feeds still holding an old subreddit RSS URL (`/r/<sub>.rss`, `/r/<sub>/.rss`, `/r/<sub>/<sort>.rss`, `/r/<sub>/<sort>/.rss`) become `REDDIT` page-URL feeds and lose their stored items; one whose page URL another feed already has is folded into the oldest, topics merged.
 - **Windows:** each active `REDDIT` feed is a window card (`data-testid="subreddit-window"`): the subreddit name, a `reddit.com ↗` link, and an iframe of `/r/<sub>/<sort>` that is `min(75dvh, 760px)` tall and scrolls on its own. The border and badge use the primary topic.
   - A window appears under every topic of its feed and under All, oldest feed first, on the **first page** of every sort.
   - Windows take feed positions 1, 3, 5, then 2, 4. Windows past the fifth follow right after position 5. If the cards run out, the remaining windows follow them. A page with windows but no cards shows the windows, not the empty state.

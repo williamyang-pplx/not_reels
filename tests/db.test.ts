@@ -93,12 +93,13 @@ describe('migrate', () => {
     ]);
   });
 
-  it('converts subreddit RSS feeds to REDDIT and deletes their items', () => {
+  it('converts subreddit RSS feeds to REDDIT page-URL feeds and deletes their items', () => {
     const conn = open();
     migrate(conn);
     conn.exec(`
       INSERT INTO "Feed" ("id", "name", "url", "sourceKind", "fetchErrorCount", "updatedAt") VALUES
         ('sub', 'Listen', 'https://www.reddit.com/r/listentothis/hot.rss', 'RSS', 3, 0),
+        ('old', 'Unix', 'https://reddit.com/r/unixporn/new/.rss', 'REDDIT', 0, 0),
         ('rss', 'Blog', 'https://b.example/feed.xml', 'RSS', 0, 0);
       INSERT INTO "FeedItem" ("id", "feedId", "guid", "title", "link", "publishedAt") VALUES
         ('i1', 'sub', 'g1', 'T', 'https://www.reddit.com/r/listentothis/comments/abcde/x/', 0),
@@ -107,15 +108,36 @@ describe('migrate', () => {
 
     migrate(conn);
 
-    const kinds = () => conn.prepare('SELECT "id", "sourceKind", "fetchErrorCount" FROM "Feed" ORDER BY "id"').all();
-    expect(kinds()).toEqual([
-      { id: 'rss', sourceKind: 'RSS', fetchErrorCount: 0 },
-      { id: 'sub', sourceKind: 'REDDIT', fetchErrorCount: 0 },
+    const feeds = () => conn.prepare('SELECT "id", "url", "sourceKind", "fetchErrorCount" FROM "Feed" ORDER BY "id"').all();
+    expect(feeds()).toEqual([
+      { id: 'old', url: 'https://www.reddit.com/r/unixporn/new/', sourceKind: 'REDDIT', fetchErrorCount: 0 },
+      { id: 'rss', url: 'https://b.example/feed.xml', sourceKind: 'RSS', fetchErrorCount: 0 },
+      { id: 'sub', url: 'https://www.reddit.com/r/listentothis/', sourceKind: 'REDDIT', fetchErrorCount: 0 },
     ]);
     expect(conn.prepare('SELECT "id" FROM "FeedItem"').all()).toEqual([{ id: 'i2' }]);
+    const before = feeds();
     migrate(conn);
-    expect(kinds()).toHaveLength(2);
-    expect(conn.prepare('SELECT COUNT(*) AS n FROM "FeedItem"').get()).toEqual({ n: 1 });
+    expect(feeds()).toEqual(before);
+  });
+
+  it('folds a subreddit feed into an older one with the same page URL, merging topics', () => {
+    const conn = open();
+    migrate(conn);
+    conn.exec(`
+      INSERT INTO "Topic" ("slug", "label") VALUES ('MUSIC', 'Music'), ('REDDIT', 'Reddit');
+      INSERT INTO "Feed" ("id", "name", "url", "sourceKind", "createdAt", "updatedAt") VALUES
+        ('a', 'Listen', 'https://www.reddit.com/r/listentothis/hot.rss', 'RSS', 1, 0),
+        ('b', 'Listen too', 'https://old.reddit.com/r/ListenToThis/.rss', 'RSS', 2, 0);
+      INSERT INTO "FeedTopic" VALUES ('a', 'MUSIC'), ('b', 'REDDIT');
+    `);
+
+    migrate(conn);
+
+    expect(conn.prepare('SELECT "id", "url" FROM "Feed"').all()).toEqual([{ id: 'a', url: 'https://www.reddit.com/r/listentothis/' }]);
+    expect(conn.prepare('SELECT "feedId", "topicSlug" FROM "FeedTopic" ORDER BY "topicSlug"').all()).toEqual([
+      { feedId: 'a', topicSlug: 'MUSIC' },
+      { feedId: 'a', topicSlug: 'REDDIT' },
+    ]);
   });
 
   it('is idempotent on a fresh DB', () => {

@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   mixSubredditWindows,
+  parseLegacySubredditRssUrl,
   parseSubredditFeedUrl,
+  subredditFeedUrl,
   redlibSubredditPath,
   redlibThreadPath,
 } from '../src/lib/reddit-feeds';
@@ -14,14 +16,9 @@ describe('parseSubredditFeedUrl', () => {
     expect(parseSubredditFeedUrl('https://old.reddit.com/r/unixporn/top/')).toEqual({ subreddit: 'unixporn', sort: 'top' });
   });
 
-  it('accepts the old subreddit RSS forms', () => {
-    expect(parseSubredditFeedUrl('https://www.reddit.com/r/unixporn/hot.rss')).toEqual({ subreddit: 'unixporn', sort: 'hot' });
-    expect(parseSubredditFeedUrl('https://reddit.com/r/AlternateAngles/.rss')).toEqual({ subreddit: 'alternateangles', sort: 'hot' });
-    expect(parseSubredditFeedUrl('https://old.reddit.com/r/listentothis.rss')).toEqual({ subreddit: 'listentothis', sort: 'hot' });
-    expect(parseSubredditFeedUrl('https://www.reddit.com/r/listentothis/new/.rss')).toEqual({ subreddit: 'listentothis', sort: 'new' });
-  });
-
-  it('rejects other URLs', () => {
+  it('rejects other URLs, the old RSS feeds included', () => {
+    expect(parseSubredditFeedUrl('https://www.reddit.com/r/unixporn/hot.rss')).toBeNull();
+    expect(parseSubredditFeedUrl('https://www.reddit.com/r/unixporn/.rss')).toBeNull();
     expect(parseSubredditFeedUrl('https://www.reddit.com/r/unixporn/top.rss?t=week')).toBeNull();
     expect(parseSubredditFeedUrl('https://www.reddit.com/r/unixporn/?sort=new')).toBeNull();
     expect(parseSubredditFeedUrl('https://www.reddit.com/r/a+b/hot.rss')).toBeNull();
@@ -29,6 +26,24 @@ describe('parseSubredditFeedUrl', () => {
     expect(parseSubredditFeedUrl('https://www.reddit.com/user/someone/.rss')).toBeNull();
     expect(parseSubredditFeedUrl('https://notreddit.com/r/unixporn/hot.rss')).toBeNull();
     expect(parseSubredditFeedUrl('local/rym_music_recs')).toBeNull();
+  });
+});
+
+describe('parseLegacySubredditRssUrl', () => {
+  it('accepts the old subreddit RSS forms and nothing else', () => {
+    expect(parseLegacySubredditRssUrl('https://www.reddit.com/r/unixporn/hot.rss')).toEqual({ subreddit: 'unixporn', sort: 'hot' });
+    expect(parseLegacySubredditRssUrl('https://reddit.com/r/AlternateAngles/.rss')).toEqual({ subreddit: 'alternateangles', sort: 'hot' });
+    expect(parseLegacySubredditRssUrl('https://old.reddit.com/r/listentothis.rss')).toEqual({ subreddit: 'listentothis', sort: 'hot' });
+    expect(parseLegacySubredditRssUrl('https://www.reddit.com/r/listentothis/new/.rss')).toEqual({ subreddit: 'listentothis', sort: 'new' });
+    expect(parseLegacySubredditRssUrl('https://www.reddit.com/r/listentothis/')).toBeNull();
+    expect(parseLegacySubredditRssUrl('https://www.reddit.com/r/a+b/hot.rss')).toBeNull();
+  });
+});
+
+describe('subredditFeedUrl', () => {
+  it('is the www page URL, with the sort unless it is hot', () => {
+    expect(subredditFeedUrl({ subreddit: 'unixporn', sort: 'hot' })).toBe('https://www.reddit.com/r/unixporn/');
+    expect(subredditFeedUrl({ subreddit: 'unixporn', sort: 'new' })).toBe('https://www.reddit.com/r/unixporn/new/');
   });
 });
 
