@@ -66,7 +66,9 @@ sw.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.origin !== location.origin) return;
-  if (request.mode === 'navigate' && PAGE_PATHS.has(url.pathname)) {
+  // Top-level loads only: a Redlib window navigating to "/" must reach the server, which sends it back to Redlib
+  // (a cached app page would refuse to load in the frame).
+  if (request.mode === 'navigate' && request.destination === 'document' && PAGE_PATHS.has(url.pathname)) {
     event.respondWith(page(event));
   } else if (/^\/(app\.[0-9a-f]+\.js|fonts\/|icons\/|youtube_music_icon\.png)/.test(url.pathname)) {
     event.respondWith(asset(request));

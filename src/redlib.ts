@@ -18,9 +18,17 @@ const REDLIB_PREFIXES = [
 ];
 const REDLIB_FILES = new Set([
   '/style.css', '/Inter.var.woff2', '/logo.png', '/touch-icon-iphone.png', '/opensearch.xml',
-  '/playHLSVideo.js', '/autoplayVisible.js', '/hls.min.js', '/highlighted.js', '/check_update.js', '/copy.js',
+  '/info', '/playHLSVideo.js', '/autoplayVisible.js', '/hls.min.js', '/highlighted.js', '/check_update.js', '/copy.js',
   '/themePreview.js', '/downloadGallery.js', '/loadMoreComments.js', '/searchTabs.js',
 ]);
+
+/** Where a frame goes when a Redlib link leads nowhere better (Redlib's "/" is our app). */
+const REDLIB_HOME = '/r/popular';
+
+/** Redlib's "home" for a page: its subreddit (/r/<sub>), or REDLIB_HOME outside one. */
+function redlibHome(path: string): string {
+  return /^\/r\/[^/]+/.exec(path)?.[0] ?? REDLIB_HOME;
+}
 
 function isRedlibPath(path: string): boolean {
   return REDLIB_FILES.has(path) || REDLIB_PREFIXES.some((p) => path.startsWith(p));
@@ -51,8 +59,13 @@ function plainText(message: string, status: 502 | 503): Response {
  * origin instead. Its CSP is kept, so the CSP middleware leaves it alone.
  */
 export const redlibProxy: MiddlewareHandler = async (c, next) => {
-  if (!isRedlibPath(c.req.path)) return next();
   const base = redlibUrl();
+  if (!isRedlibPath(c.req.path)) {
+    // Nothing frames our own pages, so a frame navigating to one is a Redlib link the allowlist and the HTML
+    // rewrite missed. Our page would refuse to load ("localhost refused to connect"); send the frame back to Redlib.
+    if (base && c.req.header('Sec-Fetch-Dest') === 'iframe') return c.redirect(REDLIB_HOME, 302);
+    return next();
+  }
   if (!base) return plainText('Reddit windows are off: REDLIB_URL is not set', 503);
 
   const headers = new Headers({ 'accept-encoding': 'identity' });
@@ -89,19 +102,21 @@ export const redlibProxy: MiddlewareHandler = async (c, next) => {
 };
 
 /**
- * A new Response (the fetch one has immutable headers) with the headers our origin needs. Successful HTML goes
- * through rewriteRedlibHtml; every other body (media, 304s, errors) streams through untouched.
+ * A new Response (the fetch one has immutable headers) with the headers our origin needs. HTML goes through
+ * rewriteRedlibHtml, error pages included (they carry the same header links); every other body streams through.
  */
 async function frameableResponse(res: Response, path: string): Promise<Response> {
   // new Headers() keeps every Set-Cookie (Redlib's settings), unlike copying with set().
   const headers = new Headers(res.headers);
   for (const name of DROPPED_RESPONSE_HEADERS) headers.delete(name);
+  // Redlib redirects some requests (an empty search) to its front page, "/", which is our app.
+  if (headers.get('location') === '/') headers.set('location', redlibHome(path));
   const csp = headers.get('content-security-policy');
   if (csp) headers.set('content-security-policy', csp.replace(/frame-ancestors[^;]*/i, "frame-ancestors 'self'"));
 
   const status = res.status;
   if (NULL_BODY_STATUSES.has(status)) return new Response(null, { status, headers });
-  if (res.ok && (headers.get('content-type') ?? '').startsWith('text/html')) {
+  if ((headers.get('content-type') ?? '').startsWith('text/html')) {
     return new Response(rewriteRedlibHtml(await res.text(), path), { status, headers });
   }
   return new Response(res.body, { status, headers });
@@ -118,7 +133,7 @@ const HOME_HREF = /(\shref\s*=\s*)(["'])\/\2/gi;
  * or /r/popular outside a subreddit.
  */
 export function rewriteRedlibHtml(html: string, path: string): string {
-  const home = /^\/r\/[^/]+/.exec(path)?.[0] ?? '/r/popular';
+  const home = redlibHome(path);
   return html.replace(ANCHOR_TAG, (tag) => {
     let out = tag.replace(HOME_HREF, `$1$2${home}$2`);
     if (EXTERNAL_HREF.test(out) && !/\starget\s*=/i.test(out)) {

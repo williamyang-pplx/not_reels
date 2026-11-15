@@ -375,7 +375,9 @@ Reddit ended RSS support on 2026-11-13, and its thread JSON needs a login. Subre
 - **Thread links:** a card whose link is a reddit.com thread (`extractRedditPost`) frames `/r/<sub>/comments/<id>/<slug>` the same way, below the link area.
 - **Proxy:** `REDLIB_URL` (§10) points at the Redlib container. The server forwards an allowlist of Redlib paths to it on the same origin: `/r/`, `/u/`, `/user/`, `/comments/`, `/duplicates/`, `/search`, `/settings`, `/wiki`, `/w/`, Redlib's media proxies (`/img/`, `/vid/`, `/hls/`, `/preview/`, `/thumb/`, …) and its static files. Our own paths (`/`, `/saved`, `/manage`, `/api/*`, `/_f/*`, public files) are never forwarded.
   - Response headers: `X-Frame-Options` and `Strict-Transport-Security` are dropped, and Redlib's CSP keeps everything but `frame-ancestors 'none'`, which becomes `frame-ancestors 'self'`.
-  - HTML bodies: an `<a>` with an absolute http(s) href and no target gets `target="_blank"` (most sites refuse to be framed), and `href="/"` (Redlib's logo) becomes `/r/<sub>` of the page, or `/r/popular`.
+  - HTML bodies, error pages included: an `<a>` with an absolute http(s) href and no target gets `target="_blank"` (most sites refuse to be framed), and `href="/"` (Redlib's logo) becomes `/r/<sub>` of the page, or `/r/popular`.
+  - A Redlib redirect to `/` (an empty search) is turned into one to `/r/<sub>` of the request, or `/r/popular`.
+  - A frame navigation (`Sec-Fetch-Dest: iframe`) to any of our own paths is redirected (302) to `/r/popular`: our pages refuse to be framed, so it can only be a Redlib link the rewrite missed.
   - Headers time out after 20 s; bodies stream with no timeout. Redlib down: 502; `REDLIB_URL` unset: 503 (plain text, `no-store`).
 - **Without `REDLIB_URL`:** a window shows "Reddit windows are off…" instead of the frame, and a thread link is a plain card.
 - **Revalidation:** a view where the user has scrolled or tapped inside a frame is never replaced by a background revalidation, and the launch-time "unchanged since render" check ignores frame `src` attributes.

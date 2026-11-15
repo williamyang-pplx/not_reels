@@ -24,7 +24,7 @@ The design is in `documentation/low_level_plan.md` and `documentation/framework_
     old React Query keys) and prefetches on `pointerdown`.
   - Save, Hide and saved-link Delete are optimistic: the card leaves on tap and comes back on error.
   - Sort is client state. It is kept across pill changes on `/` and reset when `/` is entered from another page. It never goes in the URL.
-- **Service worker** (`client/sw.ts`): stale-while-revalidate for `/`, `/saved` and `/manage`; cache-first for hashed assets.
+- **Service worker** (`client/sw.ts`): stale-while-revalidate for top-level loads of `/`, `/saved` and `/manage` (never frame navigations, so a Redlib window that reaches `/` hits the server's redirect); cache-first for hashed assets.
   Pages carry `data-rendered`. The client revalidates a page that is older than 5 s.
   Pages carry `data-build` (CSS + JS hash) and page/partial responses send `X-Build`. On a mismatch the client drops
   the cached pages and reloads once, so a page cached before a deploy never runs new markup with old JS.

@@ -32,6 +32,14 @@ const upstream: Server = createServer((req: IncomingMessage, res: ServerResponse
       res.writeHead(304);
       return res.end();
     }
+    if (req.url === '/r/x/search?q=&restrict_sr=on') {
+      res.writeHead(302, { Location: '/' });
+      return res.end();
+    }
+    if (req.url?.startsWith('/r/gone/')) {
+      res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end('<h1>Reddit blocked this request</h1><a id="redlib" href="/">redlib</a> <a id="reddit_link" href="https://www.reddit.com/r/gone/">r/</a>');
+    }
     if (req.url?.startsWith('/img/')) {
       res.writeHead(200, { 'Content-Type': 'image/jpeg' });
       return res.end(IMAGE);
@@ -116,6 +124,32 @@ describe('redlibProxy', () => {
     const res = await request('/r/x', { headers: { 'Accept-Encoding': 'br' } });
     expect(res.headers.get('Content-Encoding')).toBe('br');
     expect(brotliDecompressSync(Buffer.from(await res.arrayBuffer())).toString()).toContain('<p>post</p>');
+  });
+
+  it('turns a Redlib redirect to its front page into one to the subreddit', async () => {
+    const res = await request('/r/x/search?q=&restrict_sr=on');
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('/r/x');
+  });
+
+  it('rewrites the links on Redlib error pages too', async () => {
+    const res = await request('/r/gone/comments/abc12/x');
+    expect(res.status).toBe(404);
+    const body = await res.text();
+    expect(body).toContain('<a id="redlib" href="/r/gone">');
+    expect(body).toContain('<a target="_blank" rel="noopener" id="reddit_link" href="https://www.reddit.com/r/gone/">');
+  });
+
+  it('sends a frame that reaches one of our pages back to Redlib', async () => {
+    for (const path of ['/', '/saved', '/manage']) {
+      const res = await request(path, { headers: { 'Sec-Fetch-Dest': 'iframe' } });
+      expect(res.status, path).toBe(302);
+      expect(res.headers.get('Location')).toBe('/r/popular');
+    }
+    expect((await request('/', { headers: { 'Sec-Fetch-Dest': 'document' } })).status).toBe(200);
+    delete process.env.REDLIB_URL;
+    expect((await request('/', { headers: { 'Sec-Fetch-Dest': 'iframe' } })).status).toBe(200);
+    expect(seen).toEqual([]);
   });
 
   it('never sends our own paths to Redlib', async () => {
