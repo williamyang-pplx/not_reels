@@ -79,6 +79,13 @@ button { -webkit-user-select: none; user-select: none; }
 .yt-play::after { content: ''; position: absolute; left: 28px; top: 14px; border-style: solid; border-width: 10px 0 10px 16px; border-color: transparent transparent transparent #fff; }
 .yt:active .yt-play, .yt:hover .yt-play { background: #f00; }
 
+/* Reddit facade: a button that becomes the embed on tap. */
+@layer components {
+  .rd { @apply mt-3 block w-full rounded-md border border-border bg-muted py-2.5 text-sm text-primary; }
+  .rd:active { opacity: .6; }
+  .rd-frame { @apply mt-3 block w-full rounded-md border border-border bg-muted; height: 500px; }
+}
+
 .modal { animation: fade .12s ease-out; }
 .modal .sheet { animation: rise .16s ease-out; max-height: calc(100dvh - 24px - env(safe-area-inset-top)); overflow-y: auto; margin-bottom: env(safe-area-inset-bottom); }
 @keyframes fade { from { opacity: 0; } }

@@ -56,7 +56,8 @@ feedItemsApi.post('/refresh', async (c) => {
       return fail(c, 'Feed not found', 'NOT_FOUND', 404);
     }
     const r = await refreshSingleFeed(feedId);
-    return ok(c, { refreshed: r.ok ? 1 : 0, newItems: r.newItems, failed: r.ok ? 0 : 1, queued: 0 });
+    const queued = r.queued ? 1 : 0;
+    return ok(c, { refreshed: r.ok ? 1 - queued : 0, newItems: r.newItems, failed: r.ok ? 0 : 1, queued });
   }
   return ok(c, await refreshAllFeeds());
 });

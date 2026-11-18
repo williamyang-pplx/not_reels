@@ -460,6 +460,63 @@ describe('subreddit batches beyond the first', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it('sends a Reddit feed that is not a plain subreddit feed through the pass, after the batches', async () => {
+    createFeed({ url: 'https://www.reddit.com/r/sub00/hot.rss' });
+    const search = createFeed({ url: 'https://www.reddit.com/r/unixporn/top.rss?t=week' });
+    const { calls, fetcher } = recordingFetcher();
+
+    const result = await refreshAllFeeds({ fetcher, redditIntervalMs: INTERVAL });
+
+    expect(result).toEqual({ refreshed: 1, newItems: 1, failed: 0, queued: 1 });
+    await redditBackgroundPassDone();
+    expect(calls.map((c) => c.url)).toEqual([
+      'https://www.reddit.com/r/sub00/hot.rss?limit=100',
+      'https://www.reddit.com/r/unixporn/top.rss?t=week',
+    ]);
+    expect(calls[1].at - calls[0].at).toBeGreaterThanOrEqual(INTERVAL - 5);
+    expect(countItems(search.id)).toBe(1);
+  });
+
+  it('answers a single-feed refresh at once and fetches it in its turn when Reddit was just called', async () => {
+    const a = createFeed({ url: 'https://www.reddit.com/r/sub00/hot.rss' });
+    const b = createFeed({ url: 'https://www.reddit.com/r/sub01/hot.rss' });
+    const { calls, fetcher } = recordingFetcher();
+
+    expect(await refreshSingleFeed(a.id, { fetcher, redditIntervalMs: INTERVAL })).toEqual({ newItems: 1, ok: true });
+    expect(await refreshSingleFeed(b.id, { fetcher, redditIntervalMs: INTERVAL })).toEqual({
+      newItems: 0,
+      ok: true,
+      queued: true,
+    });
+    expect(calls).toHaveLength(1);
+
+    await sleep(INTERVAL + 20);
+    expect(calls).toHaveLength(2);
+    expect(calls[1].at - calls[0].at).toBeGreaterThanOrEqual(INTERVAL - 5);
+    expect(countItems(b.id)).toBe(1);
+  });
+
+  it('skips Reddit feeds when SKIP_REDDIT=1', async () => {
+    const reddit = createFeed({ url: 'https://www.reddit.com/r/sub00/hot.rss' });
+    const other = createFeed({ url: 'https://other.example/feed.xml' });
+    const { calls, fetcher } = recordingFetcher();
+    vi.stubEnv('SKIP_REDDIT', '1');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(await refreshAllFeeds({ fetcher, redditIntervalMs: INTERVAL })).toEqual({
+        refreshed: 1,
+        newItems: 0,
+        failed: 0,
+        queued: 0,
+      });
+      expect(await refreshSingleFeed(reddit.id, { fetcher, redditIntervalMs: INTERVAL })).toEqual({ newItems: 0, ok: true });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(calls.map((c) => c.url)).toEqual(['https://other.example/feed.xml']);
+    expect(countItems(other.id)).toBe(0);
+  });
+
   it('queues every batch when Reddit was called within the interval', async () => {
     const single = createFeed({ url: 'https://www.reddit.com/r/solo/hot.rss' });
     const { calls, fetcher } = recordingFetcher();

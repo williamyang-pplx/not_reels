@@ -21,6 +21,14 @@ describe('POST /api/feed-items/refresh', () => {
     expect(refreshSingleFeed).toHaveBeenCalledWith(feed.id);
   });
 
+  it('counts a Reddit feed that waits for its turn as queued, not refreshed', async () => {
+    const feed = createFeed();
+    const { refreshSingleFeed } = await import('../src/lib/feed-refresh');
+    vi.mocked(refreshSingleFeed).mockResolvedValueOnce({ ok: true, newItems: 0, queued: true });
+    const res = await json('POST', '/api/feed-items/refresh', { feedId: feed.id });
+    expect((await res.json()).data).toEqual({ refreshed: 0, newItems: 0, failed: 0, queued: 1 });
+  });
+
   it('refreshes an inactive feed when targeted directly', async () => {
     const feed = createFeed({ isActive: false });
     const { refreshSingleFeed } = await import('../src/lib/feed-refresh');

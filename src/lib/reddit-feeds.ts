@@ -4,9 +4,9 @@ import type { RawRssItem } from './rss-fetcher';
 /**
  * Reddit allows few unauthenticated RSS requests per IP (one per clock minute when measured in 2026-11)
  * and answers 429 to the rest. A full refresh therefore reads subreddit feeds through multireddit URLs
- * (`/r/a+b+c/hot.rss`), a few subreddits per request so that each one gets a share of the 100 entries,
- * with the requests spaced REDDIT_REQUEST_INTERVAL_MS apart. The entries are split back by the subreddit
- * in each post link.
+ * (`/r/a+b+c/hot.rss`), a few subreddits per request so that each one gets a share of the 100 entries.
+ * Every request to Reddit goes through scheduleRedditRequest, which sends them one at a time and at
+ * least REDDIT_REQUEST_INTERVAL_MS apart. The entries are split back by the subreddit in each post link.
  */
 
 export const MULTIREDDIT_ITEM_LIMIT = 100;
@@ -14,14 +14,42 @@ export const SUBREDDITS_PER_REQUEST = 8;
 export const REDDIT_REQUEST_INTERVAL_MS = 61_000;
 
 let lastRedditRequestAt = Number.NEGATIVE_INFINITY;
+let redditQueue: Promise<unknown> = Promise.resolve();
+let waitingRedditRequests = 0;
 
-/** Record a request to any Reddit URL, so that queued multireddit requests keep their distance from it. */
-export function noteRedditRequest(): void {
-  lastRedditRequestAt = Date.now();
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** True when a Reddit request would go out at once: none is waiting and none started in the last `intervalMs`. */
+export function redditRequestCanStartNow(intervalMs: number): boolean {
+  return waitingRedditRequests === 0 && lastRedditRequestAt + intervalMs <= Date.now();
 }
 
-export function msUntilNextRedditRequest(intervalMs: number): number {
-  return Math.max(0, lastRedditRequestAt + intervalMs - Date.now());
+/**
+ * Run `request` after every Reddit request scheduled before it has finished, and at least `intervalMs`
+ * after the last one started.
+ */
+export function scheduleRedditRequest<T>(intervalMs: number, request: () => Promise<T>): Promise<T> {
+  waitingRedditRequests += 1;
+  const run = redditQueue.then(async () => {
+    try {
+      const wait = lastRedditRequestAt + intervalMs - Date.now();
+      if (wait > 0) await sleep(wait);
+      lastRedditRequestAt = Date.now();
+      return await request();
+    } finally {
+      waitingRedditRequests -= 1;
+    }
+  });
+  redditQueue = run.catch(() => {});
+  return run;
+}
+
+/**
+ * The dev server (scripts/restart.sh) sets SKIP_REDDIT=1 so that refreshing at home does not spend the home
+ * IP's standing with Reddit, which the phone shares when it loads Reddit embeds on the same Wi-Fi.
+ */
+export function redditFetchesSkipped(): boolean {
+  return process.env.SKIP_REDDIT === '1';
 }
 
 /** Unique subreddits in first-seen order, split into groups of at most `size`. */

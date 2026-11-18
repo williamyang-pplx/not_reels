@@ -146,18 +146,21 @@ function YouTubeFacade({ id, title }: { id: string; title: string }) {
   );
 }
 
-function RedditEmbed({ subreddit, postId, slug, title }: { subreddit: string; postId: string; slug: string; title: string }) {
+/**
+ * The Reddit embed loads only on tap (client/app.ts). Each embed is a request from the phone to Reddit, and Reddit
+ * blocks IPs that load many in a row ("blocked by network security", a 403). The card's link still opens the post.
+ */
+function RedditFacade({ subreddit, postId, slug, title }: { subreddit: string; postId: string; slug: string; title: string }) {
   return (
-    <div class="mt-3 w-full overflow-hidden rounded-md border border-border bg-muted">
-      {/* data-src: the client sets src once the card is ~300px from the viewport (see client/app.ts). */}
-      <iframe
-        data-src={`https://www.redditmedia.com/r/${subreddit}/comments/${postId}/${slug}/?ref_source=embed&ref=share&embed=true`}
-        title={title || `Reddit thread in r/${subreddit}`}
-        loading="lazy"
-        sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-        class="block h-[500px] w-full"
-      ></iframe>
-    </div>
+    <button
+      type="button"
+      data-act="reddit"
+      data-src={`https://embed.reddit.com/r/${subreddit}/comments/${postId}/${slug}/?embed=true`}
+      aria-label={`Show Reddit post: ${title || `thread in r/${subreddit}`}`}
+      class="rd"
+    >
+      Show Reddit post
+    </button>
   );
 }
 
@@ -181,7 +184,7 @@ export function FeedCard({ item: raw, now }: { item: FeedItemDTO; now: Date }) {
       data-topic={topic}
       data-title={raw.title !== shownTitle ? raw.title : undefined}
       data-href={safeHref(item.link) ? undefined : item.link}
-      class={youTubeId || reddit ? 'card fc embed' : 'card fc'}
+      class={youTubeId ? 'card fc embed' : 'card fc'}
       style={`border-color:${topicColor(topic)}`}
     >
       <a href={safeHref(item.link)} target="_blank" rel="noopener noreferrer" class="cl">
@@ -209,7 +212,7 @@ export function FeedCard({ item: raw, now }: { item: FeedItemDTO; now: Date }) {
         </button>
       )}
       {youTubeId && <YouTubeFacade id={youTubeId} title={item.title} />}
-      {reddit && <RedditEmbed {...reddit} title={item.title} />}
+      {reddit && <RedditFacade {...reddit} title={item.title} />}
       <div class="badges">
         {topic && <TopicBadge topic={topic} />}
       </div>

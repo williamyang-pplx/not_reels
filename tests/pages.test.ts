@@ -49,7 +49,7 @@ describe('GET /', () => {
   it('sets the Content-Security-Policy header on pages, API and static responses', async () => {
     expect((await request('/')).headers.get('Content-Security-Policy')).toBe(CSP);
     expect((await request('/api/topics')).headers.get('Content-Security-Policy')).toBe(CSP);
-    expect(CSP).toContain("frame-src https://www.youtube.com https://www.youtube-nocookie.com https://www.redditmedia.com https://embed.reddit.com");
+    expect(CSP).toContain("frame-src https://www.youtube.com https://www.youtube-nocookie.com https://embed.reddit.com");
   });
 
   it('marks the Feed pill and the topic pill from the query', async () => {
@@ -239,6 +239,24 @@ describe('GET /_f/items', () => {
   it('returns 400 for an invalid sort', async () => {
     const res = await request('/_f/items?sort=oldest');
     expect(res.status).toBe(400);
+  });
+});
+
+describe('Reddit cards', () => {
+  it('render a tap-to-load button for the embed, not an iframe', async () => {
+    const { getDb } = await import('../src/db');
+    const feed = createFeed({ url: 'https://www.reddit.com/r/unixporn/hot.rss' });
+    getDb()
+      .prepare(
+        `INSERT INTO "FeedItem" ("id","feedId","guid","title","link","publishedAt","sourceRank","fetchedAt")
+         VALUES ('r1', ?, 't3_abcde', 'My rice', 'https://www.reddit.com/r/unixporn/comments/abcde/my_rice/', ?, 0, ?)`,
+      )
+      .run(feed.id, Date.now(), Date.now());
+    const { body } = await html('/');
+    expect(body).toContain('data-act="reddit"');
+    expect(body).toContain('data-src="https://embed.reddit.com/r/unixporn/comments/abcde/my_rice/?embed=true"');
+    expect(body).not.toContain('<iframe');
+    expect(body).toContain('class="card fc"');
   });
 });
 

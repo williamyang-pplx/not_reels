@@ -7,7 +7,7 @@ The design is in `documentation/low_level_plan.md` and `documentation/framework_
 - `pnpm build`: Tailwind (inlined into pages), the client bundle `dist/public/app.<hash>.js`, `sw.js`, and `dist/server.mjs`
 - `pnpm start`: `node dist/server.mjs` (PORT, default 3000; DATABASE_URL, default `file:./data/dev.db`). Migrates at boot.
 - `pnpm test`: Vitest (forks, single fork). `pnpm lint` is `tsc --noEmit`.
-- `./scripts/restart.sh`: rebuild, then serve on :3100 against `/tmp/nr-dev.db`.
+- `./scripts/restart.sh`: rebuild, then serve on :3100 against `/tmp/nr-dev.db`, with `SKIP_REDDIT=1` (no Reddit fetches; `SKIP_REDDIT=0 ./scripts/restart.sh` to fetch them).
 - `node scripts/e2e.mjs [db]`: browser pass over every UI flow on a copy of a DB. `node scripts/ui-check.mjs`: screenshots and timings.
 - `scripts/bench/`: the framework benchmark harness (see its README).
 - With a broken `NODE_OPTIONS` preload in the shell, prefix commands with `unset NODE_OPTIONS;`.
@@ -28,6 +28,8 @@ The design is in `documentation/low_level_plan.md` and `documentation/framework_
   Pages carry `data-build` (CSS + JS hash) and page/partial responses send `X-Build`. On a mismatch the client drops
   the cached pages and reloads once, so a page cached before a deploy never runs new markup with old JS.
 - **Refresh** is manual only (`POST /api/feed-items/refresh`). rss-parser is imported lazily to keep it off the cold path.
+  Every Reddit request goes through `scheduleRedditRequest` (`src/lib/reddit-feeds.ts`): one at a time, 61 s apart. Keep new Reddit fetches on it.
+- **Reddit embeds** load only on tap (`RedditFacade`). Don't make them load on scroll: Reddit 403s IPs that load many.
 
 ## Conventions
 - API errors use `fail(c, message, code, status)` and the `{ error: { message, code } }` envelope. Validate with the Zod schemas in `src/lib/validations.ts`.

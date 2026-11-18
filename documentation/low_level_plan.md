@@ -152,7 +152,7 @@ export async function refreshSingleFeed(feedId: string, options?: RefreshOptions
   // set lastFetched/fetchErrorCount=0, prune to 30 (RYM) / 15 (sourceRank asc, publishedAt desc)
   // catch: fetchErrorCount+1 (never deactivates), log "[feed-refresh] failed feed=<id> url=<url>:"
 // R2 — refreshFeeds(type) removed with the forum/blog split
-export async function refreshAllFeeds(options?: RefreshOptions): Promise<RefreshResult>  // R3 — every active feed, one p-limit(12) pool; subreddit feeds go in multireddit batches of 8, the first inline, the rest in a background pass 61 s apart, 429s retried once (src/lib/reddit-feeds.ts)
+export async function refreshAllFeeds(options?: RefreshOptions): Promise<RefreshResult>  // R3 — every active feed, one p-limit(12) pool; subreddit feeds go in multireddit batches of 8 and other Reddit feeds on their own, the first request inline, the rest in a background pass; every Reddit request (single-feed refresh too) goes through one queue 61 s apart, 429s retried once (src/lib/reddit-feeds.ts)
 
 // src/lib/local-feeds/rym-music-recs.ts
 export async function rymMusicRecsProvider(ctx: LocalFeedContext): Promise<LocalFeedItemInput[]>  // L1
@@ -201,7 +201,7 @@ export function Layout(p: { title?: string; children: Child }): JSX  // W1 — h
 export function NavBar(p: { path: string; topic: string; topics: TopicRecord[] }): JSX  // W2 — test ids per spec §8.9; pills (Feed | Saved, derived from path) are <a href> (work without JS) with data-nav
 export function TopicBadge(p: { topic: string }): JSX  // W3
 export function FeedCard(p: { item: FeedItemDTO; now: Date }): JSX  // W4 — standard + RYM variant (spec §8.4/8.5);
-  // YouTube: <lite-yt data-id> facade (thumbnail img + play button, iframe on tap); Reddit: lazy iframe (500px)
+  // YouTube: <lite-yt data-id> facade (thumbnail img + play button, iframe on tap); Reddit: "Show Reddit post" button, iframe (500px) on tap
 export function FeedPage(p: { topic; sort; data: {items; nextCursor} }): JSX  // W5 — toolbar, list, sentinel data-cursor
 export function SavedPage(p: { links: SavedLinkDTO[]; topics: TopicRecord[] }): JSX  // W6 — + Save link modal
 export function ManagePage(p: { topics: TopicRecord[]; feeds: FeedDTO[] }): JSX  // W7 — topics manager, add-feed modal, edit modal, feed rows
@@ -256,8 +256,9 @@ export function EmptyState(p: { message: string }): JSX  // W9
    instantly while a stopped Fly machine boots. The client swaps in fresh HTML once it arrives.
 8. **Save / Hide / saved-link Delete are optimistic**: the card leaves on tap and is restored, with an inline error, if the request fails.
    The "Saving…" step is never visible as a result.
-9. **Reddit iframes start loading via IntersectionObserver ~300 px before view**, instead of the browser's 1250–2500 px
-   `loading=lazy` distance. Same iframe, src and sandbox.
+9. **Reddit embeds load only on tap** (a "Show Reddit post" button, like the YouTube facade). Loading each one as it
+   scrolled into view sent the phone's IP many Reddit requests, and Reddit answered 403 ("blocked by network security").
+   The iframe is `embed.reddit.com` (redditmedia.com now redirects there), with the same sandbox.
 10. **Feed/saved links render only http(s) URLs as clickable** (`safeHref`), because the CSP allows inline script and a feed could ship `javascript:` links.
 11. HTML entities that feeds leave in titles and summaries (`What&#39;s`) are decoded for display only. Stored data is unchanged.
 12. **Topic delete shows the 409 error inline.** The original UI dropped it silently.

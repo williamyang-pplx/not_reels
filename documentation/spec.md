@@ -24,7 +24,7 @@ Do **not** assume that you must keep the current stack (§2.2). Before you write
 - Fly.io: 1 shared CPU, 512MB RAM, `auto_stop_machines` and `min_machines_running = 0`. **Cold start is part of the user's latency.** Measure the time from process start to the first byte.
 - SQLite is a file on the `/data` volume. There is one machine and no edge replicas, so "edge" frameworks don't help with data latency.
 - The main use is an iPhone home-screen PWA on a mobile network. A small JS payload and fast first paint matter more than desktop throughput.
-- You must keep: the YouTube lite embed, the Reddit iframe embed, the CSP (§9.3), the PWA manifest and the Apple meta tags (§9.2).
+- You must keep: the YouTube lite embed, the tap-to-load Reddit embed (§8.4), the CSP (§9.3), the PWA manifest and the Apple meta tags (§9.2).
 
 **Candidates to evaluate (at minimum):**
 - Next.js (current version), with server components, streaming, and as little client JS as possible.
@@ -247,14 +247,16 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
    - A subreddit feed is an RSS feed on a Reddit host whose path is `/r/<sub>.rss`, `/r/<sub>/.rss`, `/r/<sub>/<sort>.rss` or `/r/<sub>/<sort>/.rss`, with no query string. The sort defaults to `hot`.
    - Subreddit feeds are grouped by sort, then split into batches of at most `SUBREDDITS_PER_REQUEST` (8) unique subreddits. Each batch is one request: `https://www.reddit.com/r/<a>+<b>+…/<sort>.rss?limit=100`. Reddit returns at most 100 entries per request, so the batch size keeps a share for each subreddit.
    - Each entry goes to the feed whose subreddit (case-insensitive) is in the entry's `/r/<sub>/comments/…` link. Other entries are dropped. `sourceRank` is the index within that feed's entries. Then store as in §5.2 steps 3–6.
-3. **Reddit pacing.** The server records the time of every Reddit request (batches, and single RSS feeds on a Reddit host).
-   - The batches of one refresh run one at a time in a **Reddit pass**, each at least `REDDIT_REQUEST_INTERVAL_MS` (61 s) after the last Reddit request.
-   - If no Reddit request was made in the last 61 s, the first batch runs at once and the HTTP response waits for it. The other batches run in the background.
+   - A Reddit feed that is not a subreddit feed (for example one with a query string) is one request of its own, for its own URL.
+3. **Reddit pacing.** Every request to a Reddit host goes through one in-memory queue (`scheduleRedditRequest`): one at a time, each at least `REDDIT_REQUEST_INTERVAL_MS` (61 s) after the last one started. This covers batches, other Reddit feeds, single-feed refreshes and the initial fetch on create.
+   - The Reddit requests of one refresh (batches first, then the other Reddit feeds) run in a **Reddit pass**.
+   - If the queue is empty and no Reddit request started in the last 61 s, the first request runs at once and the HTTP response waits for it. The others run in the background.
    - A batch that gets a **429** goes to the back of the pass, without recording a failure, and is retried once (a freshly started process does not know what budget is left). A second 429, or any other error, records a failure for every feed in the batch (§5.2 step 7).
-   - While a pass runs, a new full refresh does not fetch subreddit feeds. It counts them as queued.
-   - `POST /api/feed-items/refresh {feedId}` and the initial fetch on create still fetch the feed's own URL at once. They do count as the last Reddit request.
-   - The pass lives in process memory. If the machine stops, the queued batches are lost until the next refresh.
-4. For the result: `refreshed` counts successes, `failed` counts failures, `newItems` is the sum of `newItems`, and `queued` is the number of subreddit feeds left to the background pass.
+   - While a pass runs, a new full refresh does not fetch Reddit feeds. It counts them as queued.
+   - `POST /api/feed-items/refresh {feedId}` and the initial fetch on create fetch the feed's own URL. If it can start at once, the response waits for it. Otherwise the fetch waits for its turn in the background, and the refresh response reads `{refreshed: 0, newItems: 0, failed: 0, queued: 1}`.
+   - The queue lives in process memory. If the machine stops, the queued requests are lost until the next refresh.
+   - With `SKIP_REDDIT=1` (the dev server, `scripts/restart.sh`), Reddit feeds are not fetched at all and count as neither refreshed nor failed.
+4. For the result: `refreshed` counts successes, `failed` counts failures, `newItems` is the sum of `newItems`, and `queued` is the number of Reddit feeds left to the background pass.
 
 Make the fetcher, the local provider registry and the concurrency injectable through an options object, so tests can stub them.
 
@@ -427,7 +429,7 @@ All pages are `force-dynamic`. The root layout wraps the page in the React Query
   - The summary. A short one (60 words or fewer) is shown whole, with hard line wraps joined into paragraphs. A longer one shows its **first 60 words** with `…`, and a **More** button below the link area loads the whole text from `GET /_f/summary/:id` (plain text, reflowed into paragraphs) and shows it in place of the excerpt, in a panel just below the link area (so reading it never opens the article). The panel's max-height keeps the card at most **3×** its collapsed height; longer text scrolls inside the panel. The button then reads **Less**, which puts the excerpt back and scrolls the card top into view if it is under the nav. The text is fetched once per item. A failed load leaves the excerpt and sets the label to **Retry**.
 - **Embeds** below the link area:
   - **YouTube:** a lite-youtube embed in an `aspect-video` box with `params="rel=0"` and the play label `Play: <title>`.
-  - **Reddit:** an iframe of `https://www.redditmedia.com/r/<sub>/comments/<id>/<slug>/?ref_source=embed&ref=share&embed=true`, 500px tall, lazy-loaded. Its sandbox is `allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox`.
+  - **Reddit:** a full-width **Show Reddit post** button (`data-act="reddit"`). A tap replaces it with an iframe of `https://embed.reddit.com/r/<sub>/comments/<id>/<slug>/?embed=true`, 500px tall, with the sandbox `allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox`. No embed loads without a tap: each one is a request from the phone to Reddit, and Reddit answers 403 ("blocked by network security") to an IP that loads many. The iframe cannot use the user's Reddit login, because Safari blocks third-party cookies.
 - **Badges:** the TopicBadge for the first topic.
 - **Actions** (small text buttons):
   - **Save:** shown only if the item has at least one topic. It runs `POST /api/saved-links {url: link, title, topic: feedTopics[0]}`. The label goes "Saving…", then "Saved!", and the button stays disabled after success. On success it invalidates **both** `['feed-items']` and `['saved-links']`.
@@ -538,13 +540,14 @@ style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
 img-src 'self' data: https: blob:;
 font-src 'self' data:;
 connect-src 'self';
-frame-src https://www.youtube.com https://www.youtube-nocookie.com https://www.redditmedia.com https://embed.reddit.com;
+frame-src https://www.youtube.com https://www.youtube-nocookie.com https://embed.reddit.com;
 media-src 'self' https:
 ```
 
 ## 10. Environment
 - `DATABASE_URL`: `file:./dev.db` locally (relative to `prisma/`). In production it is `file:///data/sqlite.db`.
 - `RYM_MUSIC_RECS_DB_PATH` and `RYM_MUSIC_RECS_PREFS_PATH`: optional overrides.
+- `SKIP_REDDIT=1`: do not fetch Reddit feeds (§5.1). `scripts/restart.sh` sets it unless `SKIP_REDDIT=0` is given.
 - The `sqlite3` CLI must be on `PATH` (the RYM provider needs it).
 - Scripts:
   - `dev`: `next dev`

@@ -17,7 +17,7 @@ export const CSP = [
   "img-src 'self' data: https: blob:",
   "font-src 'self' data:",
   "connect-src 'self'",
-  'frame-src https://www.youtube.com https://www.youtube-nocookie.com https://www.redditmedia.com https://embed.reddit.com',
+  'frame-src https://www.youtube.com https://www.youtube-nocookie.com https://embed.reddit.com',
   "media-src 'self' https:",
 ].join('; ');
 

@@ -19,10 +19,11 @@ import {
   REDDIT_REQUEST_INTERVAL_MS,
   chunkSubreddits,
   groupItemsBySubreddit,
-  msUntilNextRedditRequest,
   multiredditFeedUrl,
-  noteRedditRequest,
   parseSubredditFeedUrl,
+  redditFetchesSkipped,
+  redditRequestCanStartNow,
+  scheduleRedditRequest,
 } from './reddit-feeds';
 import type { FeedSourceKind } from './types';
 
@@ -30,13 +31,15 @@ export interface RefreshResult {
   refreshed: number;
   newItems: number;
   failed: number;
-  /** Subreddit feeds left to the background Reddit pass. */
+  /** Reddit feeds left to the background Reddit pass. */
   queued: number;
 }
 
 export interface FeedRefreshResult {
   newItems: number;
   ok: boolean;
+  /** A Reddit feed whose request waits for its turn in the background (see reddit-feeds.ts). */
+  queued?: boolean;
 }
 
 export interface RefreshOptions {
@@ -167,8 +170,11 @@ function recordFailure(feed: FeedRecord, err: unknown): FeedRefreshResult {
   return { newItems: 0, ok: false };
 }
 
+function isRedditFeed(feed: FeedRecord): boolean {
+  return feed.sourceKind === 'RSS' && detectEmbedKind(feed.url) === 'reddit';
+}
+
 async function refreshLoadedFeed(feed: FeedRecord, options: RefreshOptions): Promise<FeedRefreshResult> {
-  if (feed.sourceKind === 'RSS' && detectEmbedKind(feed.url) === 'reddit') noteRedditRequest();
   try {
     const items = await fetchNormalizedItems(feed, options);
     return { newItems: storeItems(feed, items), ok: true };
@@ -180,13 +186,24 @@ async function refreshLoadedFeed(feed: FeedRecord, options: RefreshOptions): Pro
 export async function refreshSingleFeed(feedId: string, options: RefreshOptions = {}): Promise<FeedRefreshResult> {
   const feed = loadFeed(feedId);
   if (!feed) return { newItems: 0, ok: false };
-  return refreshLoadedFeed(feed, options);
+  if (!isRedditFeed(feed)) return refreshLoadedFeed(feed, options);
+  if (redditFetchesSkipped()) {
+    console.log(`[feed-refresh] SKIP_REDDIT=1, not fetching feed=${feed.id}`);
+    return { newItems: 0, ok: true };
+  }
+  // The feed's own URL, in its turn. When it has to wait, the caller gets an answer at once and the fetch
+  // runs in the background (refreshLoadedFeed records its own failures).
+  const intervalMs = options.redditIntervalMs ?? REDDIT_REQUEST_INTERVAL_MS;
+  const startsNow = redditRequestCanStartNow(intervalMs);
+  const result = scheduleRedditRequest(intervalMs, () => refreshLoadedFeed(feed, options));
+  return startsNow ? result : { newItems: 0, ok: true, queued: true };
 }
 
-interface SubredditBatch {
-  sort: string;
-  subreddits: string[];
-  feeds: { feed: FeedRecord; subreddit: string }[];
+/** One request in a Reddit pass: a multireddit URL for a batch of subreddit feeds, or a Reddit feed's own URL. */
+interface RedditRequest {
+  url: string;
+  /** The feeds filled from the response. A null subreddit takes every entry (a feed fetched on its own URL). */
+  feeds: { feed: FeedRecord; subreddit: string | null }[];
 }
 
 /** A batch gets this many requests if Reddit answers 429 (a fresh process does not know the spent budget). */
@@ -197,61 +214,73 @@ function isRateLimited(err: unknown): boolean {
 }
 
 /**
- * One multireddit request for the feeds of one batch (see reddit-feeds.ts). Returns null, without
- * recording failures, when Reddit answered 429 and the batch has attempts left.
+ * One Reddit request for the feeds it fills (see reddit-feeds.ts). Returns null, without recording failures,
+ * when Reddit answered 429 and the request has attempts left.
  */
-async function refreshSubredditBatch(
-  batch: SubredditBatch,
+async function refreshRedditRequest(
+  request: RedditRequest,
   attempt: number,
   options: RefreshOptions,
 ): Promise<FeedRefreshResult[] | null> {
   const { defaultFetcher, normalizeAll } = await import('./rss-fetcher');
   const fetcher = options.fetcher ?? defaultFetcher;
-  let groups: Map<string, RawRssItem[]>;
-  noteRedditRequest();
+  let items: RawRssItem[];
   try {
-    const parsed = await fetcher(multiredditFeedUrl(batch.subreddits, batch.sort));
-    groups = groupItemsBySubreddit(parsed.items);
+    items = (await fetcher(request.url)).items;
   } catch (err) {
     if (isRateLimited(err) && attempt < MAX_BATCH_ATTEMPTS) return null;
-    return batch.feeds.map(({ feed }) => recordFailure(feed, err));
+    return request.feeds.map(({ feed }) => recordFailure(feed, err));
   }
+  const groups = groupItemsBySubreddit(items);
   const now = new Date();
-  return batch.feeds.map(({ feed, subreddit }) => {
+  return request.feeds.map(({ feed, subreddit }) => {
     try {
-      return { newItems: storeItems(feed, normalizeAll(groups.get(subreddit) ?? [], now)), ok: true };
+      const own = subreddit === null ? items : (groups.get(subreddit) ?? []);
+      return { newItems: storeItems(feed, normalizeAll(own, now)), ok: true };
     } catch (err) {
       return recordFailure(feed, err);
     }
   });
 }
 
-/** Split feeds into the ones fetched on their own and the subreddit batches (one sort and ≤ 8 subreddits each). */
-function planRefresh(feeds: FeedRecord[]): { singles: FeedRecord[]; batches: SubredditBatch[] } {
+/**
+ * Split feeds into the ones fetched at once and the requests of the Reddit pass: one per sort and ≤ 8
+ * subreddits for subreddit feeds, and one per other Reddit feed. With SKIP_REDDIT=1 Reddit feeds are left out.
+ */
+function planRefresh(feeds: FeedRecord[]): { singles: FeedRecord[]; redditRequests: RedditRequest[] } {
   const singles: FeedRecord[] = [];
+  const lone: RedditRequest[] = [];
   const bySort = new Map<string, { feed: FeedRecord; subreddit: string }[]>();
+  const skipReddit = redditFetchesSkipped();
   for (const feed of feeds) {
-    const subredditFeed = feed.sourceKind === 'RSS' ? parseSubredditFeedUrl(feed.url) : null;
-    if (!subredditFeed) {
+    if (!isRedditFeed(feed)) {
       singles.push(feed);
+      continue;
+    }
+    if (skipReddit) continue;
+    const subredditFeed = parseSubredditFeedUrl(feed.url);
+    if (!subredditFeed) {
+      lone.push({ url: feed.url, feeds: [{ feed, subreddit: null }] });
       continue;
     }
     const group = bySort.get(subredditFeed.sort) ?? [];
     group.push({ feed, subreddit: subredditFeed.subreddit });
     bySort.set(subredditFeed.sort, group);
   }
-  const batches: SubredditBatch[] = [];
+  if (skipReddit) console.log('[feed-refresh] SKIP_REDDIT=1, not fetching Reddit feeds');
+  const redditRequests: RedditRequest[] = [];
   for (const [sort, group] of bySort) {
     for (const subreddits of chunkSubreddits(group.map((g) => g.subreddit))) {
-      batches.push({ sort, subreddits, feeds: group.filter((g) => subreddits.includes(g.subreddit)) });
+      redditRequests.push({
+        url: multiredditFeedUrl(subreddits, sort),
+        feeds: group.filter((g) => subreddits.includes(g.subreddit)),
+      });
     }
   }
-  return { singles, batches };
+  return { singles, redditRequests: [...redditRequests, ...lone] };
 }
 
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-// The pass over one refresh's subreddit batches. It outlives the HTTP request that started it.
+// The pass over one refresh's Reddit requests. It outlives the HTTP request that started it.
 let redditPass: Promise<void> | null = null;
 
 /** Resolves when no Reddit pass is running. */
@@ -259,44 +288,35 @@ export function redditBackgroundPassDone(): Promise<void> {
   return redditPass ?? Promise.resolve();
 }
 
-async function waitForRedditSlot(intervalMs: number): Promise<void> {
-  // Loop: a per-feed Reddit refresh during the wait moves the next free slot.
-  for (let wait = msUntilNextRedditRequest(intervalMs); wait > 0; wait = msUntilNextRedditRequest(intervalMs)) {
-    await sleep(wait);
-  }
-}
-
 interface FirstBatchReport {
   results: FeedRefreshResult[];
-  /** Feeds still waiting in the pass after the first batch. */
+  /** Feeds still waiting in the pass after the first request. */
   queued: number;
 }
 
 /**
- * Run the batches one at a time, REDDIT_REQUEST_INTERVAL_MS after the last Reddit request. A batch that
- * gets a 429 goes to the back of the queue. The returned promise resolves after the first batch when no
- * Reddit request was made within the interval, else at once; the rest of the pass continues in the
- * background.
+ * Send the requests one at a time through scheduleRedditRequest. A request that gets a 429 goes to the back
+ * of the queue. The returned promise resolves after the first request when it could start at once, else at
+ * once; the rest of the pass continues in the background.
  */
-function startRedditPass(batches: SubredditBatch[], options: RefreshOptions): Promise<FirstBatchReport> {
-  const queue = batches.map((batch) => ({ batch, attempt: 0 }));
-  const queuedFeeds = () => queue.reduce((n, e) => n + e.batch.feeds.length, 0);
+function startRedditPass(requests: RedditRequest[], options: RefreshOptions): Promise<FirstBatchReport> {
+  const queue = requests.map((request) => ({ request, attempt: 0 }));
+  const queuedFeeds = () => queue.reduce((n, e) => n + e.request.feeds.length, 0);
   let report!: (r: FirstBatchReport) => void;
   const firstBatch = new Promise<FirstBatchReport>((resolve) => (report = resolve));
   const intervalMs = options.redditIntervalMs ?? REDDIT_REQUEST_INTERVAL_MS;
-  let inline = msUntilNextRedditRequest(intervalMs) === 0;
+  let inline = redditRequestCanStartNow(intervalMs);
   if (!inline) report({ results: [], queued: queuedFeeds() });
 
   redditPass = (async () => {
     for (let entry = queue.shift(); entry; entry = queue.shift()) {
-      if (!inline) await waitForRedditSlot(intervalMs);
-      entry.attempt += 1;
-      const results = await refreshSubredditBatch(entry.batch, entry.attempt, options);
-      const label = `sort=${entry.batch.sort} subs=${entry.batch.subreddits.join('+')}`;
+      const { request } = entry;
+      const attempt = (entry.attempt += 1);
+      const results = await scheduleRedditRequest(intervalMs, () => refreshRedditRequest(request, attempt, options));
       if (results) {
-        console.log(`[feed-refresh] reddit batch ${label} failed=${results.filter((r) => !r.ok).length}`);
+        console.log(`[feed-refresh] reddit ${request.url} failed=${results.filter((r) => !r.ok).length}`);
       } else {
-        console.warn(`[feed-refresh] reddit batch ${label} got 429, retrying after the interval`);
+        console.warn(`[feed-refresh] reddit ${request.url} got 429, retrying after the interval`);
         queue.push(entry);
       }
       if (inline) {
@@ -314,19 +334,19 @@ function startRedditPass(batches: SubredditBatch[], options: RefreshOptions): Pr
 }
 
 /**
- * Refresh every active feed through one p-limit pool. Subreddit feeds go through one Reddit pass: the
- * request waits for its first batch when no Reddit request was made within the interval, and the rest
- * are counted in `queued`. While a pass runs, a new refresh leaves the subreddit feeds to it.
+ * Refresh every active feed through one p-limit pool. Reddit feeds go through one Reddit pass: the
+ * request waits for the pass's first request when it can start at once, and the rest are counted in
+ * `queued`. While a pass runs, a new refresh leaves the Reddit feeds to it.
  */
 export async function refreshAllFeeds(options: RefreshOptions = {}): Promise<RefreshResult> {
   const limit = pLimit(options.concurrency ?? FETCH_CONCURRENCY);
   const feeds = getDb().prepare('SELECT * FROM "Feed" WHERE "isActive" = 1').all() as FeedRecord[];
-  const { singles, batches } = planRefresh(feeds);
+  const { singles, redditRequests } = planRefresh(feeds);
 
   let reddit: Promise<FirstBatchReport>;
-  if (batches.length === 0) reddit = Promise.resolve({ results: [], queued: 0 });
-  else if (redditPass) reddit = Promise.resolve({ results: [], queued: batches.reduce((n, b) => n + b.feeds.length, 0) });
-  else reddit = startRedditPass(batches, options);
+  if (redditRequests.length === 0) reddit = Promise.resolve({ results: [], queued: 0 });
+  else if (redditPass) reddit = Promise.resolve({ results: [], queued: redditRequests.reduce((n, r) => n + r.feeds.length, 0) });
+  else reddit = startRedditPass(redditRequests, options);
 
   const [first, singleResults] = await Promise.all([
     reddit,

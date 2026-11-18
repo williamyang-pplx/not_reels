@@ -213,28 +213,7 @@ function emptyState(message: string) {
 
 let observer: IntersectionObserver | null = null;
 
-// Reddit embeds pull in a lot of third-party JS, so start each one only when its card is
-// about to scroll into view (the browser's own lazy-loading starts them 1250-2500px early).
-const frameObserver =
-  'IntersectionObserver' in window
-    ? new IntersectionObserver(
-        (entries) => {
-          for (const e of entries) {
-            if (!e.isIntersecting) continue;
-            const f = e.target as HTMLIFrameElement;
-            f.src = f.dataset.src!;
-            frameObserver!.unobserve(f);
-          }
-        },
-        { rootMargin: '300px 0px' },
-      )
-    : null;
-
 function hydrate() {
-  for (const f of $$<HTMLIFrameElement>('iframe[data-src]:not([src])')) {
-    if (frameObserver) frameObserver.observe(f);
-    else f.src = f.dataset.src!;
-  }
   const status = $('[data-testid="refresh-status"]');
   if (status && refreshStatus) {
     status.textContent = refreshStatus;
@@ -356,6 +335,16 @@ async function cardMutation(btn: HTMLButtonElement, card: HTMLElement, kind: 'sa
     err.textContent = errMsg(e, labels[1]);
     err.hidden = false;
   }
+}
+
+// Reddit embeds load only on tap (see RedditFacade in src/views/components.tsx).
+function showRedditPost(btn: HTMLElement) {
+  const iframe = document.createElement('iframe');
+  iframe.src = btn.dataset.src!;
+  iframe.title = btn.getAttribute('aria-label')!.replace(/^Show /, '');
+  iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox');
+  iframe.className = 'rd-frame';
+  btn.replaceWith(iframe);
 }
 
 function playYouTube(btn: HTMLElement) {
@@ -707,6 +696,8 @@ document.addEventListener('click', (e) => {
       return;
     case 'yt':
       return playYouTube(btn);
+    case 'reddit':
+      return showRedditPost(btn);
     case 'more':
       return void toggleSummary(btn, card!);
     case 'refresh':
