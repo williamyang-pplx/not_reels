@@ -153,6 +153,8 @@ function postText(contentHtml: string): string | null {
  * One refresh of a subreddit feed from Redlib: its RSS (text, images, video) and its HTML listing (link, score,
  * comments), merged by permalink. Links become https://www.reddit.com permalinks so Save/Hide/archive key on them.
  * Redlib asks Reddit for the subreddit the same way for both; RSS is only the format it answers in.
+ * The listing is fetched after the RSS, not alongside it: Redlib caches Reddit's answers for 30 s but does not share
+ * one in flight, so two requests at once cost Reddit 5 calls (about and hot twice, widgets) instead of 3.
  */
 export async function fetchSubredditItems(
   feed: SubredditFeed,
@@ -161,10 +163,8 @@ export async function fetchSubredditItems(
   fetchPage: PageFetcher,
   now: Date,
 ): Promise<NormalizedItem[]> {
-  const [parsed, html] = await Promise.all([
-    fetchRss(`${base}/r/${feed.subreddit}/${feed.sort}.rss`),
-    fetchPage(base + redlibSubredditPath(feed)),
-  ]);
+  const parsed = await fetchRss(`${base}/r/${feed.subreddit}/${feed.sort}.rss`);
+  const html = await fetchPage(base + redlibSubredditPath(feed));
   const extras = parseListingExtras(html);
   const posts: { raw: RawRssItem; id: string; content: string }[] = [];
   for (const item of parsed.items) {
