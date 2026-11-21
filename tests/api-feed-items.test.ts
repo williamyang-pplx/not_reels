@@ -73,8 +73,8 @@ describe('GET /api/feed-items', () => {
   it('builds the recommended pool round-robin over feeds, so a busy feed cannot crowd out a quiet one', async () => {
     const busy = createFeed({ name: 'Busy', topic: 'TECHNOLOGY' });
     const quiet = createFeed({ name: 'Quiet', topic: 'TECHNOLOGY', url: 'https://example.com/quiet.xml' });
-    // More rank-0 items than the 200-item pool, all newer than the quiet feed's one post.
-    for (let i = 0; i < 250; i++) {
+    // More rank-0 items than the 300-item pool, all newer than the quiet feed's one post.
+    for (let i = 0; i < 350; i++) {
       insertItem(busy.id, {
         guid: `busy-${i}`,
         title: `Busy ${i}`,
@@ -206,6 +206,15 @@ describe('GET /api/feed-items', () => {
     seedItems(feed.id, 150);
     const body = await GET('?sort=new&limit=999').then((r) => r.json());
     expect(body.data.items.length).toBe(100);
+  });
+
+  it('shows the whole list, up to 300 items, for Hot and Shuffle', async () => {
+    const feed = createFeed();
+    seedItems(feed.id, 320);
+    for (const sort of ['recommended', 'random']) {
+      expect((await GET(`?sort=${sort}`).then((r) => r.json())).data.items).toHaveLength(300);
+      expect((await GET(`?sort=${sort}&limit=999`).then((r) => r.json())).data.items).toHaveLength(300);
+    }
   });
 
   it('returns 400 on invalid cursor', async () => {

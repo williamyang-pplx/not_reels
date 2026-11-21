@@ -210,17 +210,17 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
 **`GET /api/feed-items?topic=&sort=&cursor=&limit=`** (a legacy `type` param is ignored)
 - `sort` is one of `recommended` (default), `new`, `random`. Any other value gives 400 `"Invalid sort"`.
 - Each item carries `media`: the parsed RedditMedia of a Reddit post, else null.
-- `limit` is parsed as an int. If it is under 1 or NaN, return 400 `"Invalid limit"`. Values above 100 are capped to 100. The default is 50.
+- `limit` is parsed as an int. If it is under 1 or NaN, return 400 `"Invalid limit"`. For `new`, the default is 50 and values above 100 are capped to 100. For `recommended` and `random`, which never page, the default and the cap are 300, so the page shows the whole ranked list.
 - Base filter:
   - `feed.isActive = true`.
   - The feed has topic `topic` if `topic` is given and is not `ALL` (validated).
 - **Exclusion:** load all `SavedLink.url` and `HiddenLink.url`. Add `link NOT IN (...)` **to the DB query**. Do not filter these out in memory.
 - **`recommended` (shown as "Hot"):**
-  1. Fetch up to 200 items **round-robin over feeds**: number each feed's items by `sourceRank asc, publishedAt desc` (`ROW_NUMBER() OVER (PARTITION BY feedId …)`), then order by that number, then `sourceRank asc, publishedAt desc`. Every feed's best item is in the pool before any feed's second, so a busy feed can't crowd out a quiet one.
+  1. Fetch up to 300 items **round-robin over feeds**: number each feed's items by `sourceRank asc, publishedAt desc` (`ROW_NUMBER() OVER (PARTITION BY feedId …)`), then order by that number, then `sourceRank asc, publishedAt desc`. Every feed's best item is in the pool before any feed's second, so a busy feed can't crowd out a quiet one.
   2. Give each item a "primary topic": the first entry of its feed's topics. In practice that is the lowest slug alphabetically, because the join rows come back in PK order.
   3. Run the recommender (§6). Pass `topicCounts` (the number of SavedLinks per topic). Set `applyTopicBalance = true` only when no topic filter is set or the filter is `ALL`.
   4. Slice to `limit`. `nextCursor` is always `null`.
-- **`random`:** fetch the 200 most recent items (`publishedAt desc`), shuffle them with Fisher–Yates, slice to `limit`. `nextCursor` is always `null`.
+- **`random`:** fetch the 300 most recent items (`publishedAt desc`), shuffle them with Fisher–Yates, slice to `limit`. `nextCursor` is always `null`.
 - **`new`:**
   - If `cursor` is given (ISO datetime; invalid gives 400 `"Invalid cursor"`), add `publishedAt < cursor`.
   - Fetch `limit+1` items ordered by `publishedAt desc`.
@@ -619,7 +619,7 @@ Write Vitest suites with the same coverage as these existing files:
 ## 13. Known quirks (copy them as they are unless told otherwise)
 - The confirm text for deleting a topic says it "will also delete all feeds". In fact the server **refuses** with 409 if any feed would be left with no topic. It deletes only saved links that have that topic.
 - The "primary topic" of an item (used for Save, the border color, the badge and topic balance) is the first FeedTopic row, which means the lowest slug alphabetically. It is not the first topic the user selected.
-- Hot and Random never page (`nextCursor: null`), so you see at most 50 items (the default page size).
+- Hot and Shuffle never page (`nextCursor: null`); they show the whole list, up to 300 items.
 - Feed-row Refresh on Manage does not invalidate any query. The UI does not show the result.
 - Hiding an item does not invalidate `['saved-links']`. Saving invalidates both.
 - There is no UI to edit saved links or to unhide hidden links, but the APIs exist.

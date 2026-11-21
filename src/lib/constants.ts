@@ -15,9 +15,9 @@ export const DEFAULT_TOPICS: { slug: string; label: string }[] = [
   { slug: 'OTHER', label: 'Other' },
 ];
 
-export const PAGE_SIZE_DEFAULT = 50; // cards per page; fewer cards (and images) on the first paint
+export const PAGE_SIZE_DEFAULT = 50; // New: cards per page; fewer cards (and images) on the first paint
 export const PAGE_SIZE_MAX = 100;
-export const RELEVANT_FETCH_SIZE = 200;
+export const RANKED_LIST_SIZE = 300; // Hot and Shuffle: posts ranked or shuffled and shown, all on one page
 
 export const MAX_ITEMS_PER_FEED = 30;
 

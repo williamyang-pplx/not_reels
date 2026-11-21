@@ -1,5 +1,5 @@
 import { getDb, bool, toDate } from '../db';
-import { RELEVANT_FETCH_SIZE } from './constants';
+import { RANKED_LIST_SIZE } from './constants';
 import { recommendItems } from './recommendation';
 import type { Feed, FeedItem, RedditMedia, SavedLink, SortOrder } from './types';
 
@@ -174,10 +174,10 @@ export function listFeedItems(q: FeedItemsQuery): { items: FeedItemDTO[]; nextCu
                ROW_NUMBER() OVER (PARTITION BY i."feedId" ORDER BY i."sourceRank" ASC, i."publishedAt" DESC) AS feedRank
              ${from}
            ) ORDER BY feedRank ASC, "sourceRank" ASC, "publishedAt" DESC LIMIT ?`;
-    take = RELEVANT_FETCH_SIZE;
+    take = RANKED_LIST_SIZE;
   } else if (q.sort === 'random') {
     sql = `SELECT ${ITEM_COLUMNS} ${from} ORDER BY i."publishedAt" DESC LIMIT ?`;
-    take = RELEVANT_FETCH_SIZE;
+    take = RANKED_LIST_SIZE;
   } else {
     sql = `SELECT ${ITEM_COLUMNS} ${from} ORDER BY i."publishedAt" DESC LIMIT ?`;
     take = q.limit + 1;

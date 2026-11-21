@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { getDb } from '../db';
 import { fail, ok, parseJson } from '../lib/api';
 import { RefreshBodySchema, TopicSchema } from '../lib/validations';
-import { PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX } from '../lib/constants';
+import { PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, RANKED_LIST_SIZE } from '../lib/constants';
 import { listFeedItems, type FeedItemsQuery } from '../lib/queries';
 import { refreshAllFeeds, refreshSingleFeed } from '../lib/feed-refresh';
 import type { SortOrder } from '../lib/types';
@@ -19,11 +19,13 @@ export function parseFeedItemsQuery(params: Record<string, string | undefined>):
   const sort = (params.sort ?? 'recommended') as SortOrder;
   if (!SORTS.includes(sort)) return { error: 'Invalid sort' };
 
-  let limit = PAGE_SIZE_DEFAULT;
+  // Hot and Shuffle (sort=random) never page, so they show their whole list; New pages on scroll.
+  const maxLimit = sort === 'new' ? PAGE_SIZE_MAX : RANKED_LIST_SIZE;
+  let limit = sort === 'new' ? PAGE_SIZE_DEFAULT : RANKED_LIST_SIZE;
   if (params.limit) {
     const n = Number.parseInt(params.limit, 10);
     if (!Number.isFinite(n) || n < 1) return { error: 'Invalid limit' };
-    limit = Math.min(n, PAGE_SIZE_MAX);
+    limit = Math.min(n, maxLimit);
   }
 
   const q: FeedItemsQuery = { sort, limit };

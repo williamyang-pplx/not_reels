@@ -34,7 +34,7 @@ button { -webkit-user-select: none; user-select: none; }
 .shuffle[aria-pressed='true'] { background: hsl(210 90% 56%); border-color: transparent; color: #fff; }
 .shuffle:active { background: hsl(210 30% 20%); }
 
-/* Cards: short class names keep 100-card pages small; content-visibility skips layout and
+/* Cards: short class names keep 300-card pages small; content-visibility skips layout and
    paint for off-screen cards, which matters on phones. */
 @layer components {
   .card { @apply rounded-lg bg-card p-4; content-visibility: auto; contain-intrinsic-size: auto 160px; }
