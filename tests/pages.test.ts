@@ -31,7 +31,7 @@ describe('GET /', () => {
       'refresh-button',
       'sort-recommended',
       'sort-new',
-      'sort-random',
+      'shuffle-button',
       'sentinel',
       'feed-card',
       'save-feed-item-btn',

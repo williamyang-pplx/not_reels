@@ -98,6 +98,16 @@ try {
   assert.ok(!page.url().includes('sort='));
   ok('sort kept across pills and not in URL');
 
+  // Shuffle takes over from Hot/New and deals a fresh order on each tap; tapping Hot leaves it.
+  await page.click('[data-testid=shuffle-button]');
+  await page.waitForFunction(() => document.querySelector('[data-testid=shuffle-button]')?.getAttribute('aria-pressed') === 'true' && document.querySelector('[data-current-sort=random]'));
+  assert.equal(await page.$('[role=tab][aria-selected=true]'), null);
+  await page.click('[data-testid=sort-recommended]');
+  await page.waitForFunction(() => document.querySelector('[data-current-sort=recommended]') && document.querySelector('[data-testid=shuffle-button]')?.getAttribute('aria-pressed') === 'false');
+  await page.click('[data-testid=sort-new]');
+  await page.waitForFunction(() => document.querySelector('[data-current-sort=new]'));
+  ok('shuffle toggles random order and Hot/New leave it');
+
   // Infinite scroll in New mode (if enough items).
   await page.click('[data-testid=topic-pill-ALL]');
   await page.waitForURL((u) => !u.search.includes('topic'));

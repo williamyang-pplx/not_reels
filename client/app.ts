@@ -403,6 +403,13 @@ async function toggleSummary(btn: HTMLButtonElement, card: HTMLElement) {
   btn.textContent = 'Less';
 }
 
+/** Move the sort highlight right away: Hot/New in the segmented control, Random on the Shuffle button. */
+function setSort(next: Sort) {
+  sort = next;
+  for (const b of $$('button[data-sort]')) b.setAttribute('aria-selected', String(b.dataset.sort === next));
+  $('[data-testid="shuffle-button"]')?.setAttribute('aria-pressed', String(next === 'random'));
+}
+
 async function refreshAll(btn: HTMLButtonElement) {
   const status = $('[data-testid="refresh-status"]')!;
   refreshStatus = null;
@@ -721,8 +728,7 @@ document.addEventListener('click', (e) => {
   if (sortBtn) {
     const next = sortBtn.dataset.sort as Sort;
     if (next === sort) return;
-    sort = next;
-    for (const b of $$('button[data-sort]')) b.setAttribute('aria-selected', String(b === sortBtn));
+    setSort(next);
     void navigate(location.href, { push: false });
     return;
   }
@@ -754,6 +760,10 @@ document.addEventListener('click', (e) => {
       return requestCloseViewer();
     case 'refresh':
       return void refreshAll(btn);
+    case 'shuffle':
+      // Every tap deals a fresh order, so skip the view cache.
+      setSort('random');
+      return void navigate(location.href, { push: false, force: true });
     case 'delete-saved': {
       const marker = detachCard(card!); // optimistic, like save/hide
       const token = navToken;

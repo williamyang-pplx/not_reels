@@ -19,7 +19,7 @@ const TYPE_OPTIONS: { value: FilterType; label: string }[] = [
   { value: 'SAVED', label: 'Saved' },
 ];
 
-const SORT_LABELS: Record<SortOrder, string> = { recommended: 'Hot', new: 'New', random: 'Random' };
+const SORT_LABELS = { recommended: 'Hot', new: 'New' } as const;
 
 /** URL for a (view, topic) pair: Saved → /saved, Feed → /; only `topic` goes in the query (spec §8.2). */
 export function viewHref(type: FilterType, topic: string): string {
@@ -171,8 +171,17 @@ export function FeedPage({
         >
           Refresh feeds
         </button>
+        <button
+          type="button"
+          data-act="shuffle"
+          data-testid="shuffle-button"
+          aria-pressed={sort === 'random' ? 'true' : 'false'}
+          class="shuffle shrink-0 h-9 px-3.5 rounded-full text-sm border border-border bg-transparent"
+        >
+          Shuffle
+        </button>
         <div class="seg flex shrink-0 rounded-full border border-border overflow-hidden text-sm" role="tablist">
-          {(['recommended', 'new', 'random'] as const).map((s) => (
+          {(['recommended', 'new'] as const).map((s) => (
             <button
               type="button"
               role="tab"

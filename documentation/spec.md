@@ -10,7 +10,7 @@ not-reels is a personal RSS aggregator for one user. There are no accounts and n
 
 - The user registers **feeds**. Each feed has one or more user-defined **topics**. There are no feed types: every feed goes into the same stream.
 - A feed is either a remote **RSS/Atom** URL or a **local provider** (`local/<provider_id>`). The only local provider is `rym_music_recs`, which samples album recommendations from a bundled SQLite DB.
-- The main page shows one stream of feed items from every active feed, filtered by topic. It has three sort modes: Hot, New and Random.
+- The main page shows one stream of feed items from every active feed, filtered by topic. It has two sort modes, Hot and New, and a Shuffle button that shows the items in random order.
 - The user can **Save** an item, which moves it to the Saved list, or **Hide** it, which removes it permanently. Saved and hidden URLs never show in the main stream.
 - The user can also add saved links by hand.
 - Refresh is **manual only**. There is no cron or scheduler.
@@ -424,7 +424,8 @@ All pages are `force-dynamic`. The root layout wraps the page in the React Query
     - On success, the status text reads `Refreshed N · M new`, or `Refreshed N, M new, F failed` if any feed failed. Then it invalidates `['feed-items']`.
     - On error, the status text reads `Refresh failed`.
     - The status text clears when a new refresh starts.
-  - **Sort segmented control:** **Hot** (`recommended`, the default), **New**, **Random**. This is local component state and is not in the URL.
+  - **"Shuffle"** button (rounded-full outline, filled while active). It sets the sort to `random` and loads a fresh order on every tap (it skips the view cache).
+  - **Sort segmented control:** **Hot** (`recommended`, the default) and **New**. Neither is selected while Shuffle is active; tapping one leaves shuffle. The sort is local component state and is not in the URL.
   - The status text sits right-aligned and muted.
 - **List:** uses `useInfiniteQuery`. `getNextPageParam` is `nextCursor`, so only New mode pages.
   - An `IntersectionObserver` watches a sentinel `div` (`h-8`) after the list. It calls `fetchNextPage` when the sentinel is visible, `hasNextPage` is true and nothing is fetching.
@@ -510,7 +511,7 @@ An item uses this variant when `feedUrl === 'local/rym_music_recs'` or its guid 
 ### 8.9 Test IDs (keep them for test parity)
 - Layout and nav: `nav-bar`, `nav-manage-link`, `type-filter-row`, `type-pill-{FEED|SAVED}`, `topic-filter-row`, `topic-pill-{slug|ALL}`.
 - Redlib sheet: `redlib-viewer`.
-- Feed page: `feed-list`, `refresh-button`, `refresh-status`, `sort-{recommended|new|random}`, `sentinel`, `empty-state`.
+- Feed page: `feed-list`, `refresh-button`, `refresh-status`, `shuffle-button`, `sort-{recommended|new}`, `sentinel`, `empty-state`.
 - Feed cards: `feed-card`, `comments-btn`, `save-feed-item-btn`, `hide-feed-item-btn`, `archive-feed-item-btn`, `youtube-music-feed-item-link`.
 - Saved page: `saved-link-card`, `saved-link-delete`, `add-saved-link-btn`, `add-saved-link-modal`.
 - Manage page: `add-feed-btn`, `add-feed-modal`, `edit-feed-modal`, `feed-row`, `feed-pause-btn`, `feed-edit-btn`, `feed-delete-btn`, `topics-manager`, `topic-input`, `add-topic-btn`, `topic-chip`, `move-topic-left-{slug}`, `move-topic-right-{slug}`, `delete-topic-{slug}`, `topic-checkbox-{slug}`.

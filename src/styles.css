@@ -30,6 +30,9 @@ button { -webkit-user-select: none; user-select: none; }
 .seg button { transition: background-color .12s, color .12s; }
 .seg button[aria-selected='true'] { background: hsl(210 90% 56%); color: #fff; }
 .seg button[aria-selected='false']:active { background: hsl(210 30% 20%); }
+.shuffle { transition: background-color .12s, color .12s; }
+.shuffle[aria-pressed='true'] { background: hsl(210 90% 56%); border-color: transparent; color: #fff; }
+.shuffle:active { background: hsl(210 30% 20%); }
 
 /* Cards: short class names keep 100-card pages small; content-visibility skips layout and
    paint for off-screen cards, which matters on phones. */
