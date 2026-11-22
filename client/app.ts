@@ -175,21 +175,34 @@ async function navigate(href: string, opts: { push?: boolean; scroll?: number | 
     swap(hit.html, scroll);
     if (fresh) return;
     // Stale: revalidate, and only re-render if the user hasn't started reading or changed anything.
+    // Autoplay waits for the revalidation, so its swap can't cut off a video that just started; a video the user
+    // tapped meanwhile keeps the old view.
     const seen = mutations;
-    load(key, true)
-      .then((html) => {
-        if (token === navToken && seen === mutations && html !== hit.html && window.scrollY < 40 && sort !== 'random' && !viewerOpen()) {
+    holdAutoplay(
+      load(key, true).then((html) => {
+        if (
+          token === navToken &&
+          seen === mutations &&
+          html !== hit.html &&
+          window.scrollY < 40 &&
+          sort !== 'random' &&
+          !viewerOpen() &&
+          !player?.frame.isConnected
+        ) {
           swap(html, null);
         }
-      })
-      .catch(() => {});
+      }),
+    );
     return;
   }
 
   markPills(url);
   loading(true);
   try {
-    const html = await load(key, opts.force);
+    // The old view stays up during the fetch: start no video there that the swap would cut off.
+    const pending = load(key, opts.force);
+    holdAutoplay(pending);
+    const html = await pending;
     if (token === navToken) swap(html, scroll);
   } catch {
     if (token !== navToken) return;
@@ -220,6 +233,7 @@ function hydrate() {
     status.textContent = refreshStatus;
     status.hidden = false;
   }
+  watchVideos();
   observer?.disconnect();
   const sentinel = $<HTMLElement>('.sentinel[data-cursor]');
   if (!sentinel) return;
@@ -288,6 +302,8 @@ function openTab(url: string) {
 
 /** Take a card out of the list right away, leaving a marker so it can be put back on failure. */
 function detachCard(card: HTMLElement): Comment {
+  // A card that comes back after a failure shows its thumbnail, not a reloading player.
+  if (player && card.contains(player.frame)) stopPlayer();
   const marker = document.createComment('card');
   card.replaceWith(marker);
   return marker;
@@ -338,14 +354,122 @@ async function cardMutation(btn: HTMLButtonElement, card: HTMLElement, kind: 'sa
   }
 }
 
-function playYouTube(btn: HTMLElement) {
+/**
+ * Start the box's player, stopping any other first: there is one YouTube player at most. Autoplay passes
+ * autoplayed = true and gets `mute=1` (iOS only autoplays muted video; sound is YouTube's own control). A tap
+ * cancels a pending pick, so the timer of the scroll before it can't replace the video the user chose.
+ */
+function playYouTube(btn: HTMLElement, autoplayed = false) {
+  stopPlayer();
+  if (!autoplayed) clearTimeout(settleTimer);
   const iframe = document.createElement('iframe');
-  iframe.src = `https://www.youtube-nocookie.com/embed/${btn.dataset.id}?autoplay=1&rel=0&playsinline=1`;
+  iframe.src = `https://www.youtube-nocookie.com/embed/${btn.dataset.id}?autoplay=1&rel=0&playsinline=1${autoplayed ? '&mute=1' : ''}`;
   iframe.title = btn.getAttribute('aria-label') ?? 'YouTube video';
   iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
   iframe.allowFullscreen = true;
   iframe.className = 'absolute inset-0 w-full h-full border-0';
+  const box = btn.parentElement!;
   btn.replaceWith(iframe);
+  player = { box, btn, frame: iframe, autoplayed };
+}
+
+// ---------- YouTube autoplay ----------
+
+const AUTOPLAY_KEY = 'nr-autoplay'; // localStorage: 'off' when switched off; absent means on
+const AUTOPLAY_SETTLE_MS = 300; // scrolling must rest this long before a video starts
+const IN_FRAME_RATIO = 0.45; // a box is in frame from about half visible (slack for rounding at the 0.5 threshold)
+let autoplayOn = localStorage.getItem(AUTOPLAY_KEY) !== 'off';
+/** The one live YouTube player: its box, its facade button (put back on stop), its iframe and how it started. */
+let player: { box: HTMLElement; btn: HTMLElement; frame: HTMLIFrameElement; autoplayed: boolean } | null = null;
+/**
+ * Facade boxes in frame under the nav, kept by videoObserver. An observer rather than measuring every box on each
+ * settle: measuring boxes in off-screen cards would force the layout that `content-visibility: auto` skips.
+ */
+const inFrame = new Set<HTMLElement>();
+let videoObserver: IntersectionObserver | null = null;
+let settleTimer = 0;
+let autoplayHolds = 0;
+
+/** Tear the live player down: its button (thumbnail) goes back in place of the iframe. */
+function stopPlayer() {
+  if (player?.frame.isConnected) player.frame.replaceWith(player.btn);
+  player = null;
+}
+
+/**
+ * After every render and on a switch change: show the switch's state, forget a player the swap removed, and (autoplay
+ * on) observe every video box against the area under the sticky nav. Autoplay off observes nothing: a tapped video
+ * plays on as before, and a tap still keeps one player.
+ */
+function watchVideos() {
+  $('[data-act="autoplay"]')?.setAttribute('aria-pressed', String(autoplayOn));
+  if (player && !player.frame.isConnected) player = null;
+  videoObserver?.disconnect();
+  videoObserver = null;
+  inFrame.clear();
+  clearTimeout(settleTimer);
+  if (!autoplayOn) return;
+  const top = $('[data-testid="nav-bar"]')?.offsetHeight ?? 0;
+  videoObserver = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        if (e.intersectionRatio >= IN_FRAME_RATIO) inFrame.add(e.target as HTMLElement);
+        else inFrame.delete(e.target as HTMLElement);
+      }
+      scheduleAutoplay();
+    },
+    { rootMargin: `-${top}px 0px 0px 0px`, threshold: [0, 0.25, 0.5] },
+  );
+  for (const box of $$('.yt-box', app)) videoObserver.observe(box);
+}
+
+/** (Re)start the settle timer: on scroll, observer changes, the sheet closing and when a hold ends. */
+function scheduleAutoplay() {
+  clearTimeout(settleTimer);
+  if (autoplayOn) settleTimer = window.setTimeout(autoplayPick, AUTOPLAY_SETTLE_MS);
+}
+
+/**
+ * The settle timer's work. Nothing while a load is held, the page is hidden or the sheet is open. No box in frame:
+ * stop the player (it scrolled away). Otherwise play the box whose centre is nearest the centre of the area under the
+ * nav, muted, unless the live player is already in it.
+ */
+function autoplayPick() {
+  if (!autoplayOn || autoplayHolds > 0 || document.hidden || viewerOpen()) return;
+  if (inFrame.size === 0) return stopPlayer();
+  const top = $('[data-testid="nav-bar"]')?.getBoundingClientRect().bottom ?? 0;
+  const mid = (top + window.innerHeight) / 2;
+  let best: HTMLElement | null = null;
+  let bestDistance = Infinity;
+  for (const box of inFrame) {
+    const r = box.getBoundingClientRect();
+    const distance = Math.abs((r.top + r.bottom) / 2 - mid);
+    if (distance < bestDistance) [best, bestDistance] = [box, distance];
+  }
+  if (player?.frame.isConnected && player.box === best) return;
+  const btn = best && $('[data-act="yt"]', best);
+  if (btn) playYouTube(btn, true);
+}
+
+/**
+ * Keep autoplay from starting until `p` settles (a load that may swap the view), then pick. On the reloadIfStale
+ * path `p` never settles: the hold stays on, and the page reloads anyway.
+ */
+function holdAutoplay(p: Promise<unknown>) {
+  autoplayHolds++;
+  p.catch(() => {}).finally(() => {
+    autoplayHolds--;
+    scheduleAutoplay();
+  });
+}
+
+/** The nav switch: keep the choice on this device; off stops an autoplayed video (a tapped one plays on). */
+function setAutoplay(on: boolean) {
+  autoplayOn = on;
+  if (on) localStorage.removeItem(AUTOPLAY_KEY);
+  else localStorage.setItem(AUTOPLAY_KEY, 'off');
+  if (!on && player?.autoplayed) stopPlayer();
+  watchVideos();
 }
 
 // A card carries a summary excerpt. "More" fetches the whole text once (kept per item) and shows it in place of the
@@ -610,6 +734,7 @@ const REDLIB_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups
 function openViewer(path: string, title: string, opener: HTMLElement) {
   const v = viewer();
   if (!v) return;
+  stopPlayer(); // no video plays behind the sheet
   const frame = document.createElement('iframe');
   frame.src = path;
   frame.title = title;
@@ -633,6 +758,7 @@ function closeViewer() {
   document.documentElement.style.overflow = '';
   viewerOpener?.focus({ preventScroll: true });
   viewerOpener = null;
+  scheduleAutoplay();
 }
 
 /**
@@ -800,6 +926,8 @@ document.addEventListener('click', (e) => {
       return;
     case 'yt':
       return playYouTube(btn);
+    case 'autoplay':
+      return setAutoplay(!autoplayOn);
     case 'more':
       return void toggleSummary(btn, card!);
     case 'close-viewer':
@@ -870,6 +998,11 @@ document.addEventListener(
   { capture: true, passive: true },
 );
 
+// A settled scroll picks the most centered video (the observer alone misses a centre change inside the frame). No
+// visibilitychange handler: iOS pauses the player when the app is hidden, and stopping it would lose the place of a
+// video the user unmuted; autoplayPick skips while the page is hidden.
+window.addEventListener('scroll', scheduleAutoplay, { passive: true });
+
 window.addEventListener('popstate', (e) => {
   // Back from the sheet: close it and leave the feed (and its scroll position) alone.
   if (viewerPushed) {
@@ -892,13 +1025,14 @@ hydrate();
 
 // Served from the service worker's page cache: show it, then swap in fresh HTML unless the
 // user has already started scrolling, changed anything, or opened the Redlib sheet.
+// Autoplay waits for it: once a video had started, `app.innerHTML === before` would always fail.
 if (Date.now() - renderedAt > 5_000) {
   const before = app.innerHTML;
-  load(bootKey, true)
-    .then((html) => {
+  holdAutoplay(
+    load(bootKey, true).then((html) => {
       if (app.innerHTML === before && window.scrollY < 40 && !viewerOpen()) swap(html, null);
-    })
-    .catch(() => {});
+    }),
+  );
 }
 
 if ('serviceWorker' in navigator) {

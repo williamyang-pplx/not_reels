@@ -128,7 +128,7 @@ function youtubeMusicSearchUrl(albumTitle: string): string {
 
 function YouTubeFacade({ id, title }: { id: string; title: string }) {
   return (
-    <div class="mt-3 aspect-video w-full overflow-hidden rounded-md bg-muted relative">
+    <div class="yt-box mt-3 aspect-video w-full overflow-hidden rounded-md bg-muted relative">
       <button
         type="button"
         data-act="yt"

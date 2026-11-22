@@ -79,14 +79,20 @@ export function NavBar({ path, topic, topics }: { path: string; topic: string; t
         <a href="/" data-nav class="font-bold text-2xl tracking-tight">
           Not Brain Rot
         </a>
-        <a
-          href="/manage"
-          data-nav
-          data-testid="nav-manage-link"
-          class={`text-sm px-1 py-1 ${path === '/manage' ? 'text-foreground' : 'text-muted-foreground'}`}
-        >
-          Manage
-        </a>
+        <div class="flex items-center gap-3">
+          {/* Rendered on; the client sets aria-pressed from localStorage on every render (client/app.ts watchVideos). */}
+          <button type="button" data-act="autoplay" data-testid="autoplay-toggle" aria-pressed="true" class="autoplay text-sm px-1 py-1">
+            Autoplay
+          </button>
+          <a
+            href="/manage"
+            data-nav
+            data-testid="nav-manage-link"
+            class={`text-sm px-1 py-1 ${path === '/manage' ? 'text-foreground' : 'text-muted-foreground'}`}
+          >
+            Manage
+          </a>
+        </div>
       </div>
       {onFeedRoute && (
         <div class="mx-auto max-w-2xl">

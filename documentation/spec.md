@@ -451,7 +451,7 @@ All pages are `force-dynamic`. The root layout wraps the page in the React Query
 
 ### 8.2 NavBar (sticky, on every page)
 - **Header:** sticky, `z-40`, translucent background with backdrop blur, bottom border. Top padding is `env(safe-area-inset-top)`.
-- **Row 1:** the title link **"Not Reels"** (to `/`, `text-2xl` semibold) on the left. A **"Manage"** link (to `/manage`, small, muted) on the right.
+- **Row 1:** the title link **"Not Reels"** (to `/`, `text-2xl` semibold) on the left. On the right, an **"Autoplay"** switch (`aria-pressed`, blue when on; per device in localStorage `nr-autoplay`, absent means on), then a **"Manage"** link (to `/manage`, small, muted).
 - **Rows 2 and 3** show only on `/` and `/saved`.
   - **Type pills:** **Feed** (FEED, `/`) and **Saved** (SAVED, `/saved`). They are horizontally scrollable, with the scrollbar hidden. The active pill is filled with the primary color.
   - **Topic pills:** **All**, then every topic label in API order. The active pill uses the accent color.
@@ -481,7 +481,7 @@ All pages are `force-dynamic`. The root layout wraps the page in the React Query
   - The title.
   - The summary. A short one (60 words or fewer) is shown whole, with hard line wraps joined into paragraphs. A longer one shows its **first 60 words** with `…`, and a **More** button below the link area loads the whole text from `GET /_f/summary/:id` (plain text, reflowed into paragraphs) and shows it in place of the excerpt, in a panel just below the link area (so reading it never opens the article). The panel's max-height keeps the card at most **3×** its collapsed height; longer text scrolls inside the panel. The button then reads **Less**, which puts the excerpt back and scrolls the card top into view if it is under the nav. The text is fetched once per item. A failed load leaves the excerpt and sets the label to **Retry**.
 - **Embeds** below the link area:
-  - **YouTube:** a lite-youtube embed in an `aspect-video` box with `params="rel=0"` and the play label `Play: <title>`.
+  - **YouTube:** a thumbnail with a play button (label `Play: <title>`) in an `aspect-video` box (`.yt-box`). A tap swaps in a `youtube-nocookie` iframe (`rel=0&autoplay=1&playsinline=1`). There is one player at most: starting one puts the last one's thumbnail back. With Autoplay on, when scrolling rests for 300 ms, the box (about half visible or more under the nav) nearest the centre plays muted (`mute=1`; iOS only autoplays muted video); sound is YouTube's own control. An autoplayed video stops when its box leaves the frame, the Redlib sheet opens, the switch goes off or the view changes. A tapped one plays until another starts, it leaves the frame (Autoplay on), its card leaves, the sheet opens or the view changes. A hidden page leaves the player alone (iOS pauses it). A view load or revalidation holds autoplay until it settles.
   - **Reddit:** posts from REDDIT feeds have their own layout, and any reddit.com thread gets a `Comments` button that opens the Redlib sheet (§7.1). No frame loads with the feed.
 - **Badges:** the TopicBadge for the first topic.
 - **Actions** (small text buttons):
@@ -552,7 +552,7 @@ An item uses this variant when `feedUrl === 'local/rym_music_recs'` or its guid 
 **TopicCheckboxList:** a bordered box that scrolls past `max-h-40`. It has one checkbox row per topic, showing the label. With no topics, it shows "No topics — add one in Manage".
 
 ### 8.9 Test IDs (keep them for test parity)
-- Layout and nav: `nav-bar`, `nav-manage-link`, `type-filter-row`, `type-pill-{FEED|SAVED}`, `topic-filter-row`, `topic-pill-{slug|ALL}`.
+- Layout and nav: `nav-bar`, `nav-manage-link`, `autoplay-toggle`, `type-filter-row`, `type-pill-{FEED|SAVED}`, `topic-filter-row`, `topic-pill-{slug|ALL}`.
 - Redlib sheet: `redlib-viewer`.
 - Feed page: `feed-list`, `refresh-button`, `refresh-status`, `shuffle-button`, `sort-{recommended|new}`, `sentinel`, `empty-state`.
 - Feed cards: `feed-card`, `comments-btn`, `save-feed-item-btn`, `hide-feed-item-btn`, `archive-feed-item-btn`, `youtube-music-feed-item-link`.

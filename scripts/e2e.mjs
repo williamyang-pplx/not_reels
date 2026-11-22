@@ -308,6 +308,78 @@ try {
     ok('Reddit cards: no sheet without REDLIB_URL');
   }
 
+  // YouTube autoplay, on a topic of its own seeded only now, so the Save/Hide flows above never took these cards:
+  // three videos (newest under New), then plain items to scroll past. YouTube itself is blocked; the checks read
+  // the player URLs (muted playback is checked by hand on a phone).
+  const vids = ['e2eVideo001', 'e2eVideo002', 'e2eVideo003'];
+  const videoRows = vids.map((v, i) => `('e2e-v${i}','e2e-video','gv${i}','Video ${i}','https://www.youtube.com/watch?v=${v}',${now + 300_000 - i * 1000},${i},${now})`);
+  const plainRows = Array.from({ length: 10 }, (_, i) => `('e2e-p${i}','e2e-video','gp${i}','Plain ${i}','https://example.com/e2e/plain/${i}',${now - i * 1000},${10 + i},${now})`);
+  execFileSync('sqlite3', [db, `INSERT INTO Topic (slug,label,position) VALUES ('E2E_VIDEO','E2E video',99);
+INSERT INTO Feed (id,name,url,sourceKind,isActive,fetchErrorCount,createdAt,updatedAt) VALUES ('e2e-video','Videos','https://example.invalid/videos.xml','RSS',1,0,${now},${now});
+INSERT INTO FeedTopic VALUES ('e2e-video','E2E_VIDEO');
+INSERT INTO FeedItem (id,feedId,guid,title,link,publishedAt,sourceRank,fetchedAt) VALUES ${[...videoRows, ...plainRows].join(',')};`]);
+  await page.route(/youtube-nocookie\.com|i\.ytimg\.com/, (r) => r.abort());
+  await page.goto(base + '/?topic=E2E_VIDEO', { waitUntil: 'load' });
+  await page.click('[data-testid=sort-new]');
+  await page.waitForFunction(() => document.querySelector('[data-testid=feed-card] h3')?.textContent === 'Video 0');
+  const players = () => page.$$eval('.yt-box iframe', (fs) => fs.map((f) => f.src));
+  const settle = () => page.waitForTimeout(700);
+  // Scroll so box i's centre is the centre of the area under the nav.
+  const centre = (i) =>
+    page.evaluate((i) => {
+      const r = document.querySelectorAll('.yt-box')[i].getBoundingClientRect();
+      const top = document.querySelector('[data-testid=nav-bar]').getBoundingClientRect().bottom;
+      window.scrollBy(0, (r.top + r.bottom) / 2 - (top + innerHeight) / 2);
+    }, i);
+  const tap = (i) => page.evaluate((i) => document.querySelectorAll('.yt-box')[i].querySelector('button').click(), i);
+
+  await centre(0);
+  await settle();
+  let srcs = await players();
+  assert.equal(srcs.length, 1);
+  assert.ok(srcs[0].includes(`/embed/${vids[0]}?`) && srcs[0].includes('mute=1'), srcs[0]);
+  await centre(1);
+  await settle();
+  srcs = await players();
+  assert.equal(srcs.length, 1);
+  assert.ok(srcs[0].includes(`/embed/${vids[1]}?`) && srcs[0].includes('mute=1'), srcs[0]);
+  assert.equal(await page.$$eval('.yt-box', (bs) => bs.filter((b) => b.querySelector('button[data-act=yt]')).length), 2);
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await settle();
+  assert.equal((await players()).length, 0);
+  ok('autoplay plays the most centered video, muted, one player at a time, and stops it when it leaves the frame');
+
+  await centre(0);
+  await settle();
+  await page.click('[data-testid=autoplay-toggle]');
+  assert.equal(await page.getAttribute('[data-testid=autoplay-toggle]', 'aria-pressed'), 'false');
+  assert.equal((await players()).length, 0);
+  await page.reload({ waitUntil: 'load' });
+  await page.click('[data-testid=sort-new]');
+  await page.waitForFunction(() => document.querySelector('[data-testid=feed-card] h3')?.textContent === 'Video 0');
+  assert.equal(await page.getAttribute('[data-testid=autoplay-toggle]', 'aria-pressed'), 'false');
+  await centre(0);
+  await settle();
+  assert.equal((await players()).length, 0);
+  await tap(0);
+  srcs = await players();
+  assert.ok(srcs.length === 1 && srcs[0].includes(vids[0]) && !srcs[0].includes('mute=1'), String(srcs));
+  await tap(1);
+  srcs = await players();
+  assert.ok(srcs.length === 1 && srcs[0].includes(vids[1]), String(srcs));
+  await page.click('[data-testid=autoplay-toggle]');
+  assert.equal(await page.getAttribute('[data-testid=autoplay-toggle]', 'aria-pressed'), 'true');
+  // A tap during the settle wait of a scroll wins: the pick that scroll started is cancelled.
+  await centre(1);
+  await settle();
+  await centre(0);
+  await page.waitForTimeout(100);
+  await tap(2);
+  await settle();
+  srcs = await players();
+  assert.ok(srcs.length === 1 && srcs[0].includes(vids[2]) && !srcs[0].includes('mute=1'), String(srcs));
+  ok('the Autoplay switch is kept per device; a tap plays with sound and wins over a pending pick');
+
   assert.deepEqual(errors, []);
   ok('no page errors');
 } catch (e) {

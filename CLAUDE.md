@@ -24,6 +24,9 @@ The design is in `documentation/low_level_plan.md` and `documentation/framework_
     old React Query keys) and prefetches on `pointerdown`.
   - Save, Hide and saved-link Delete are optimistic: the card leaves on tap and comes back on error.
   - Sort is client state. It is kept across pill changes on `/` and reset when `/` is entered from another page. It never goes in the URL.
+  - YouTube: one player at a time. With the nav's Autoplay switch on (localStorage), the most centered video box
+    plays muted once scrolling settles; a view load or revalidation holds it (`holdAutoplay`) so a swap never cuts
+    off a video it just started.
 - **Service worker** (`client/sw.ts`): stale-while-revalidate for top-level loads of `/`, `/saved` and `/manage` (never frame navigations, so a Redlib page in the sheet that reaches `/` hits the server's redirect); cache-first for hashed assets.
   Pages carry `data-rendered`. The client revalidates a page that is older than 5 s.
   Pages carry `data-build` (CSS + JS hash) and page/partial responses send `X-Build`. On a mismatch the client drops

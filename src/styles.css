@@ -33,6 +33,9 @@ button { -webkit-user-select: none; user-select: none; }
 .shuffle { transition: background-color .12s, color .12s; }
 .shuffle[aria-pressed='true'] { background: hsl(210 90% 56%); border-color: transparent; color: #fff; }
 .shuffle:active { background: hsl(210 30% 20%); }
+/* The nav bar's Autoplay switch: muted when off, the accent blue when on. */
+.autoplay { color: hsl(0 0% 64%); transition: color .12s; }
+.autoplay[aria-pressed='true'] { color: hsl(210 90% 56%); }
 
 /* Cards: short class names keep 300-card pages small; content-visibility skips layout and
    paint for off-screen cards, which matters on phones. */

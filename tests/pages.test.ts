@@ -21,6 +21,7 @@ describe('GET /', () => {
     for (const id of [
       'nav-bar',
       'nav-manage-link',
+      'autoplay-toggle',
       'type-filter-row',
       'type-pill-FEED',
       'type-pill-SAVED',
@@ -52,6 +53,13 @@ describe('GET /', () => {
     expect((await request('/api/topics')).headers.get('Content-Security-Policy')).toBe(CSP);
     expect(CSP).toContain("frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com;");
     expect(CSP).toContain("frame-ancestors 'none'");
+  });
+
+  it('renders the Autoplay switch on every page, pressed by default', async () => {
+    for (const path of ['/', '/saved', '/manage']) {
+      const { body } = await html(path);
+      expect(body, path).toMatch(/<button type="button" data-act="autoplay" data-testid="autoplay-toggle" aria-pressed="true"/);
+    }
   });
 
   it('marks the Feed pill and the topic pill from the query', async () => {
@@ -175,7 +183,7 @@ describe('Reddit cards', () => {
 
   it("gives a YouTube link post the YouTube player, and another link post a link to its site", async () => {
     let body = await redditPost({ url: 'https://youtu.be/OpG_9PRNzOA' });
-    expect(body).toContain('data-act="yt" data-id="OpG_9PRNzOA"');
+    expect(body).toMatch(/<div class="yt-box [^"]*"><button type="button" data-act="yt" data-id="OpG_9PRNzOA"/);
     resetDb();
     body = await redditPost({ url: 'https://www.example.org/article' });
     expect(body).toContain('<a class="ext" href="https://www.example.org/article" target="_blank" rel="noopener noreferrer">example.org ↗</a>');
