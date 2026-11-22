@@ -12,7 +12,12 @@ import { pagesRouter } from './pages';
 import { imageCache } from './image-cache';
 import { redlibProxy } from './redlib';
 
-/** Set on every response that has none. Proxied Redlib pages keep Redlib's own CSP (with frame-ancestors 'self'). */
+/**
+ * Set on every response that has none. Proxied Redlib pages keep Redlib's own CSP (with frame-ancestors 'self').
+ * No Referrer-Policy is set, so browsers send our origin to YouTube's player, which requires it (error 153
+ * otherwise). Never add `no-referrer` or `same-origin`. The IFrame API script and its widget script come from
+ * https://www.youtube.com (script-src) and need no connect-src.
+ */
 export const CSP = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://cdn.jsdelivr.net",

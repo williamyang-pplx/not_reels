@@ -1,5 +1,8 @@
-// The only browser JS. Pages are server-rendered; this file swaps views in place (with a
-// small cache standing in for React Query), runs card actions, infinite scroll and the forms.
+// The only browser JS, with client/youtube.ts (the YouTube player) bundled in. Pages are server-rendered; this file
+// swaps views in place (with a small cache standing in for React Query), runs card actions, infinite scroll and the
+// forms.
+
+import { holdAutoplay, initYouTube, playerLive, scheduleAutoplay, stopPlayer, stopPlayerIn, tapVideo, toggleAutoplay, watchVideos } from './youtube';
 
 type Sort = 'recommended' | 'new' | 'random';
 type Kind = 'feed' | 'saved' | 'manage';
@@ -187,7 +190,7 @@ async function navigate(href: string, opts: { push?: boolean; scroll?: number | 
           window.scrollY < 40 &&
           sort !== 'random' &&
           !viewerOpen() &&
-          !player?.frame.isConnected
+          !playerLive()
         ) {
           swap(html, null);
         }
@@ -303,7 +306,7 @@ function openTab(url: string) {
 /** Take a card out of the list right away, leaving a marker so it can be put back on failure. */
 function detachCard(card: HTMLElement): Comment {
   // A card that comes back after a failure shows its thumbnail, not a reloading player.
-  if (player && card.contains(player.frame)) stopPlayer();
+  stopPlayerIn(card);
   const marker = document.createComment('card');
   card.replaceWith(marker);
   return marker;
@@ -352,124 +355,6 @@ async function cardMutation(btn: HTMLButtonElement, card: HTMLElement, kind: 'sa
     err.textContent = errMsg(e, labels[1]);
     err.hidden = false;
   }
-}
-
-/**
- * Start the box's player, stopping any other first: there is one YouTube player at most. Autoplay passes
- * autoplayed = true and gets `mute=1` (iOS only autoplays muted video; sound is YouTube's own control). A tap
- * cancels a pending pick, so the timer of the scroll before it can't replace the video the user chose.
- */
-function playYouTube(btn: HTMLElement, autoplayed = false) {
-  stopPlayer();
-  if (!autoplayed) clearTimeout(settleTimer);
-  const iframe = document.createElement('iframe');
-  iframe.src = `https://www.youtube-nocookie.com/embed/${btn.dataset.id}?autoplay=1&rel=0&playsinline=1${autoplayed ? '&mute=1' : ''}`;
-  iframe.title = btn.getAttribute('aria-label') ?? 'YouTube video';
-  iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
-  iframe.allowFullscreen = true;
-  iframe.className = 'absolute inset-0 w-full h-full border-0';
-  const box = btn.parentElement!;
-  btn.replaceWith(iframe);
-  player = { box, btn, frame: iframe, autoplayed };
-}
-
-// ---------- YouTube autoplay ----------
-
-const AUTOPLAY_KEY = 'nr-autoplay'; // localStorage: 'off' when switched off; absent means on
-const AUTOPLAY_SETTLE_MS = 300; // scrolling must rest this long before a video starts
-const IN_FRAME_RATIO = 0.45; // a box is in frame from about half visible (slack for rounding at the 0.5 threshold)
-let autoplayOn = localStorage.getItem(AUTOPLAY_KEY) !== 'off';
-/** The one live YouTube player: its box, its facade button (put back on stop), its iframe and how it started. */
-let player: { box: HTMLElement; btn: HTMLElement; frame: HTMLIFrameElement; autoplayed: boolean } | null = null;
-/**
- * Facade boxes in frame under the nav, kept by videoObserver. An observer rather than measuring every box on each
- * settle: measuring boxes in off-screen cards would force the layout that `content-visibility: auto` skips.
- */
-const inFrame = new Set<HTMLElement>();
-let videoObserver: IntersectionObserver | null = null;
-let settleTimer = 0;
-let autoplayHolds = 0;
-
-/** Tear the live player down: its button (thumbnail) goes back in place of the iframe. */
-function stopPlayer() {
-  if (player?.frame.isConnected) player.frame.replaceWith(player.btn);
-  player = null;
-}
-
-/**
- * After every render and on a switch change: show the switch's state, forget a player the swap removed, and (autoplay
- * on) observe every video box against the area under the sticky nav. Autoplay off observes nothing: a tapped video
- * plays on as before, and a tap still keeps one player.
- */
-function watchVideos() {
-  $('[data-act="autoplay"]')?.setAttribute('aria-pressed', String(autoplayOn));
-  if (player && !player.frame.isConnected) player = null;
-  videoObserver?.disconnect();
-  videoObserver = null;
-  inFrame.clear();
-  clearTimeout(settleTimer);
-  if (!autoplayOn) return;
-  const top = $('[data-testid="nav-bar"]')?.offsetHeight ?? 0;
-  videoObserver = new IntersectionObserver(
-    (entries) => {
-      for (const e of entries) {
-        if (e.intersectionRatio >= IN_FRAME_RATIO) inFrame.add(e.target as HTMLElement);
-        else inFrame.delete(e.target as HTMLElement);
-      }
-      scheduleAutoplay();
-    },
-    { rootMargin: `-${top}px 0px 0px 0px`, threshold: [0, 0.25, 0.5] },
-  );
-  for (const box of $$('.yt-box', app)) videoObserver.observe(box);
-}
-
-/** (Re)start the settle timer: on scroll, observer changes, the sheet closing and when a hold ends. */
-function scheduleAutoplay() {
-  clearTimeout(settleTimer);
-  if (autoplayOn) settleTimer = window.setTimeout(autoplayPick, AUTOPLAY_SETTLE_MS);
-}
-
-/**
- * The settle timer's work. Nothing while a load is held, the page is hidden or the sheet is open. No box in frame:
- * stop the player (it scrolled away). Otherwise play the box whose centre is nearest the centre of the area under the
- * nav, muted, unless the live player is already in it.
- */
-function autoplayPick() {
-  if (!autoplayOn || autoplayHolds > 0 || document.hidden || viewerOpen()) return;
-  if (inFrame.size === 0) return stopPlayer();
-  const top = $('[data-testid="nav-bar"]')?.getBoundingClientRect().bottom ?? 0;
-  const mid = (top + window.innerHeight) / 2;
-  let best: HTMLElement | null = null;
-  let bestDistance = Infinity;
-  for (const box of inFrame) {
-    const r = box.getBoundingClientRect();
-    const distance = Math.abs((r.top + r.bottom) / 2 - mid);
-    if (distance < bestDistance) [best, bestDistance] = [box, distance];
-  }
-  if (player?.frame.isConnected && player.box === best) return;
-  const btn = best && $('[data-act="yt"]', best);
-  if (btn) playYouTube(btn, true);
-}
-
-/**
- * Keep autoplay from starting until `p` settles (a load that may swap the view), then pick. On the reloadIfStale
- * path `p` never settles: the hold stays on, and the page reloads anyway.
- */
-function holdAutoplay(p: Promise<unknown>) {
-  autoplayHolds++;
-  p.catch(() => {}).finally(() => {
-    autoplayHolds--;
-    scheduleAutoplay();
-  });
-}
-
-/** The nav switch: keep the choice on this device; off stops an autoplayed video (a tapped one plays on). */
-function setAutoplay(on: boolean) {
-  autoplayOn = on;
-  if (on) localStorage.removeItem(AUTOPLAY_KEY);
-  else localStorage.setItem(AUTOPLAY_KEY, 'off');
-  if (!on && player?.autoplayed) stopPlayer();
-  watchVideos();
 }
 
 // A card carries a summary excerpt. "More" fetches the whole text once (kept per item) and shows it in place of the
@@ -925,9 +810,9 @@ document.addEventListener('click', (e) => {
       openTab('https://pressreleased.alwaysdata.net/');
       return;
     case 'yt':
-      return playYouTube(btn);
+      return tapVideo(btn);
     case 'autoplay':
-      return setAutoplay(!autoplayOn);
+      return toggleAutoplay();
     case 'more':
       return void toggleSummary(btn, card!);
     case 'close-viewer':
@@ -998,11 +883,6 @@ document.addEventListener(
   { capture: true, passive: true },
 );
 
-// A settled scroll picks the most centered video (the observer alone misses a centre change inside the frame). No
-// visibilitychange handler: iOS pauses the player when the app is hidden, and stopping it would lose the place of a
-// video the user unmuted; autoplayPick skips while the page is hidden.
-window.addEventListener('scroll', scheduleAutoplay, { passive: true });
-
 window.addEventListener('popstate', (e) => {
   // Back from the sheet: close it and leave the feed (and its scroll position) alone.
   if (viewerPushed) {
@@ -1018,6 +898,7 @@ window.addEventListener('popstate', (e) => {
 // ---------- boot ----------
 
 history.scrollRestoration = 'manual';
+initYouTube(viewerOpen);
 const bootKey = keyFor(new URL(location.href));
 const renderedAt = Number(app.dataset.rendered) || Date.now();
 cache.set(bootKey, { html: app.innerHTML, at: renderedAt });

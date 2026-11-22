@@ -309,8 +309,8 @@ try {
   }
 
   // YouTube autoplay, on a topic of its own seeded only now, so the Save/Hide flows above never took these cards:
-  // three videos (newest under New), then plain items to scroll past. YouTube itself is blocked; the checks read
-  // the player URLs (muted playback is checked by hand on a phone).
+  // three videos (newest under New), then plain items to scroll past. YouTube itself is blocked and its IFrame API
+  // is a fake that records what the page asks of the player (real playback is checked by hand on a phone).
   const vids = ['e2eVideo001', 'e2eVideo002', 'e2eVideo003'];
   const videoRows = vids.map((v, i) => `('e2e-v${i}','e2e-video','gv${i}','Video ${i}','https://www.youtube.com/watch?v=${v}',${now + 300_000 - i * 1000},${i},${now})`);
   const plainRows = Array.from({ length: 10 }, (_, i) => `('e2e-p${i}','e2e-video','gp${i}','Plain ${i}','https://example.com/e2e/plain/${i}',${now - i * 1000},${10 + i},${now})`);
@@ -318,67 +318,208 @@ try {
 INSERT INTO Feed (id,name,url,sourceKind,isActive,fetchErrorCount,createdAt,updatedAt) VALUES ('e2e-video','Videos','https://example.invalid/videos.xml','RSS',1,0,${now},${now});
 INSERT INTO FeedTopic VALUES ('e2e-video','E2E_VIDEO');
 INSERT INTO FeedItem (id,feedId,guid,title,link,publishedAt,sourceRank,fetchedAt) VALUES ${[...videoRows, ...plainRows].join(',')};`]);
-  await page.route(/youtube-nocookie\.com|i\.ytimg\.com/, (r) => r.abort());
-  await page.goto(base + '/?topic=E2E_VIDEO', { waitUntil: 'load' });
-  await page.click('[data-testid=sort-new]');
-  await page.waitForFunction(() => document.querySelector('[data-testid=feed-card] h3')?.textContent === 'Video 0');
-  const players = () => page.$$eval('.yt-box iframe', (fs) => fs.map((f) => f.src));
-  const settle = () => page.waitForTimeout(700);
+  // The fake YT.Player: an about:blank frame in place of its element; methods only after onReady (as the real one),
+  // which fires after 10 ms unless window.__ytNoReady; every call is logged in window.__yt.calls.
+  const FAKE_YT = `(() => {
+    const yt = (window.__yt = { calls: [], time: 0, muted: true, videoId: null, player: null });
+    const methods = {
+      loadVideoById(a) { this.id = a.videoId; yt.calls.push(['load', a.videoId, a.startSeconds]); },
+      playVideo() { yt.calls.push(['play']); },
+      pauseVideo() { yt.calls.push(['pause']); },
+      mute() { yt.muted = true; yt.calls.push(['mute']); },
+      isMuted() { return yt.muted; },
+      getCurrentTime() { return yt.time; },
+      getVideoData() { return { video_id: yt.videoId ?? this.id }; },
+    };
+    class Player {
+      constructor(el, o) {
+        this.o = o;
+        this.id = o.videoId;
+        const f = document.createElement('iframe');
+        f.src = 'about:blank';
+        f.width = o.width;
+        f.height = o.height;
+        el.replaceWith(f);
+        yt.calls.push(['new', o.videoId, o.playerVars.start]);
+        yt.player = this;
+        setTimeout(() => { if (!window.__ytNoReady) { Object.assign(this, methods); o.events.onReady(); } }, 10);
+      }
+    }
+    window.YT = { Player };
+    window.onYouTubeIframeAPIReady?.();
+  })();`;
+  const contexts = [];
+  /** A fresh iPhone page on the video topic, under New; `api` is 'fake' or 'abort', `delay` holds the fake back. */
+  async function videoPage({ api = 'fake', noReady = false, delay = 0 } = {}) {
+    const c = await browser.newContext({ ...devices['iPhone 14 Pro'] });
+    contexts.push(c);
+    if (noReady) await c.addInitScript(() => (window.__ytNoReady = true));
+    const p = await c.newPage();
+    p.on('pageerror', (e) => errors.push(String(e)));
+    await p.route(/youtube-nocookie\.com|i\.ytimg\.com/, (r) => r.abort());
+    await p.route('https://www.youtube.com/iframe_api', async (r) => {
+      if (api === 'abort') return r.abort();
+      if (delay) await new Promise((res) => setTimeout(res, delay));
+      return r.fulfill({ contentType: 'application/javascript', body: FAKE_YT });
+    });
+    await openVideos(p);
+    return p;
+  }
+  async function openVideos(p) {
+    await p.goto(base + '/?topic=E2E_VIDEO', { waitUntil: 'load' });
+    await p.click('[data-testid=sort-new]');
+    await p.waitForFunction(() => document.querySelector('[data-testid=feed-card] h3')?.textContent === 'Video 0');
+  }
+  const settle = (p, ms = 700) => p.waitForTimeout(ms);
   // Scroll so box i's centre is the centre of the area under the nav.
-  const centre = (i) =>
-    page.evaluate((i) => {
+  const centre = (p, i) =>
+    p.evaluate((i) => {
       const r = document.querySelectorAll('.yt-box')[i].getBoundingClientRect();
       const top = document.querySelector('[data-testid=nav-bar]').getBoundingClientRect().bottom;
       window.scrollBy(0, (r.top + r.bottom) / 2 - (top + innerHeight) / 2);
     }, i);
-  const tap = (i) => page.evaluate((i) => document.querySelectorAll('.yt-box')[i].querySelector('button').click(), i);
+  const toBottom = (p) => p.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  const tap = (p, i) => p.evaluate((i) => document.querySelectorAll('.yt-box')[i].querySelector('button').click(), i);
+  const calls = (p) => p.evaluate(() => window.__yt?.calls ?? []);
+  const last = async (p) => (await calls(p)).at(-1);
+  const cardFrames = (p) => p.$$eval('.yt-box iframe', (fs) => fs.map((f) => f.src));
+  /** Whether the layer shows, and how far it is from box i (max of the four edges, px). */
+  const layerOn = (p, i) =>
+    p.evaluate((i) => {
+      const l = document.querySelector('.yt-layer');
+      if (!l || l.hidden) return { shown: false };
+      const a = l.getBoundingClientRect();
+      const b = document.querySelectorAll('.yt-box')[i].getBoundingClientRect();
+      return { shown: true, off: Math.max(...['top', 'left', 'width', 'height'].map((k) => Math.abs(a[k] - b[k]))), frames: l.querySelectorAll('iframe').length };
+    }, i);
+  const fire = (p, event, arg) => p.evaluate(([event, arg]) => window.__yt.player.o.events[event](arg), [event, arg]);
 
-  await centre(0);
-  await settle();
-  let srcs = await players();
-  assert.equal(srcs.length, 1);
-  assert.ok(srcs[0].includes(`/embed/${vids[0]}?`) && srcs[0].includes('mute=1'), srcs[0]);
-  await centre(1);
-  await settle();
-  srcs = await players();
-  assert.equal(srcs.length, 1);
-  assert.ok(srcs[0].includes(`/embed/${vids[1]}?`) && srcs[0].includes('mute=1'), srcs[0]);
-  assert.equal(await page.$$eval('.yt-box', (bs) => bs.filter((b) => b.querySelector('button[data-act=yt]')).length), 2);
-  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-  await settle();
-  assert.equal((await players()).length, 0);
-  ok('autoplay plays the most centered video, muted, one player at a time, and stops it when it leaves the frame');
+  let vp = await videoPage();
+  await centre(vp, 0);
+  await vp.waitForFunction(() => window.__yt?.calls.length, null, { timeout: 5000 });
+  await settle(vp, 100);
+  assert.deepEqual((await calls(vp))[0], ['new', vids[0], 0]);
+  let on = await layerOn(vp, 0);
+  assert.ok(on.shown && on.off <= 1 && on.frames === 1, JSON.stringify(on));
+  await centre(vp, 1);
+  await settle(vp);
+  assert.deepEqual(await last(vp), ['load', vids[1], 0]);
+  on = await layerOn(vp, 1);
+  assert.ok(on.shown && on.off <= 1 && on.frames === 1, JSON.stringify(on));
+  assert.deepEqual(await cardFrames(vp), []);
+  await toBottom(vp);
+  await settle(vp);
+  assert.deepEqual(await last(vp), ['pause']);
+  assert.equal((await layerOn(vp, 1)).shown, false);
+  assert.ok(await vp.$$eval('.yt-box', (bs) => bs.every((b) => b.getBoundingClientRect().height >= 200)));
+  ok('one layer player follows the most centered video (boxes at least 200 px tall) and pauses when none is in frame');
 
-  await centre(0);
-  await settle();
-  await page.click('[data-testid=autoplay-toggle]');
-  assert.equal(await page.getAttribute('[data-testid=autoplay-toggle]', 'aria-pressed'), 'false');
-  assert.equal((await players()).length, 0);
-  await page.reload({ waitUntil: 'load' });
-  await page.click('[data-testid=sort-new]');
-  await page.waitForFunction(() => document.querySelector('[data-testid=feed-card] h3')?.textContent === 'Video 0');
-  assert.equal(await page.getAttribute('[data-testid=autoplay-toggle]', 'aria-pressed'), 'false');
-  await centre(0);
-  await settle();
-  assert.equal((await players()).length, 0);
-  await tap(0);
-  srcs = await players();
-  assert.ok(srcs.length === 1 && srcs[0].includes(vids[0]) && !srcs[0].includes('mute=1'), String(srcs));
-  await tap(1);
-  srcs = await players();
-  assert.ok(srcs.length === 1 && srcs[0].includes(vids[1]), String(srcs));
-  await page.click('[data-testid=autoplay-toggle]');
-  assert.equal(await page.getAttribute('[data-testid=autoplay-toggle]', 'aria-pressed'), 'true');
-  // A tap during the settle wait of a scroll wins: the pick that scroll started is cancelled.
-  await centre(1);
-  await settle();
-  await centre(0);
-  await page.waitForTimeout(100);
-  await tap(2);
-  await settle();
-  srcs = await players();
-  assert.ok(srcs.length === 1 && srcs[0].includes(vids[2]) && !srcs[0].includes('mute=1'), String(srcs));
-  ok('the Autoplay switch is kept per device; a tap plays with sound and wins over a pending pick');
+  await centre(vp, 0);
+  await settle(vp);
+  await vp.evaluate(() => (window.__yt.time = 42.7));
+  await centre(vp, 1);
+  await settle(vp);
+  await centre(vp, 0);
+  await settle(vp);
+  assert.deepEqual(await last(vp), ['load', vids[0], 42]);
+  await vp.evaluate(() => (window.__yt.muted = false));
+  const callsBefore = (await calls(vp)).length;
+  await centre(vp, 2);
+  await settle(vp);
+  assert.ok(!(await calls(vp)).slice(callsBefore).some((c) => c[0] === 'mute'), 'an unmuted player stays unmuted');
+  await fire(vp, 'onAutoplayBlocked');
+  assert.deepEqual((await calls(vp)).slice(-2), [['mute'], ['play']]);
+  await fire(vp, 'onStateChange', { data: 0 });
+  await vp.evaluate(() => (window.__yt.time = 99));
+  await centre(vp, 1);
+  await settle(vp);
+  await centre(vp, 2);
+  await settle(vp);
+  assert.deepEqual(await last(vp), ['load', vids[2], 0]);
+  ok('a video resumes where it stopped, sound stays as the player has it, an ended video starts over');
+
+  // Video 2 is playing in the layer. An error for another video (it arrived after a load) changes nothing; one for
+  // video 2 moves it to a per-card player, which it keeps.
+  await vp.evaluate((v) => (window.__yt.videoId = v), vids[0]);
+  await fire(vp, 'onError', { data: 150 });
+  assert.equal((await layerOn(vp, 2)).shown, true);
+  await vp.evaluate(() => (window.__yt.videoId = null));
+  await fire(vp, 'onError', { data: 150 });
+  assert.equal((await layerOn(vp, 2)).shown, false);
+  let frames = await cardFrames(vp);
+  assert.ok(frames.length === 1 && frames[0].includes(`/embed/${vids[2]}?`) && frames[0].includes('mute=1'), String(frames));
+  await centre(vp, 1);
+  await settle(vp);
+  assert.deepEqual(await cardFrames(vp), []);
+  assert.deepEqual(await last(vp), ['load', vids[1], 99]);
+  await centre(vp, 2);
+  await settle(vp);
+  frames = await cardFrames(vp);
+  assert.ok(frames.length === 1 && frames[0].includes(vids[2]) && (await layerOn(vp, 2)).shown === false, String(frames));
+  ok('a video that errors in the layer player plays in its own card from then on; a stale error is ignored');
+
+  // The switch is kept per device. With it off, a first tap plays in the card at once (the API loads meanwhile);
+  // the next tap uses the layer player, and the card's player goes.
+  await vp.click('[data-testid=autoplay-toggle]');
+  assert.equal(await vp.getAttribute('[data-testid=autoplay-toggle]', 'aria-pressed'), 'false');
+  assert.deepEqual(await cardFrames(vp), []);
+  await openVideos(vp);
+  assert.equal(await vp.getAttribute('[data-testid=autoplay-toggle]', 'aria-pressed'), 'false');
+  await centre(vp, 0);
+  await settle(vp);
+  assert.deepEqual(await calls(vp), []);
+  assert.deepEqual(await cardFrames(vp), []);
+  await tap(vp, 0);
+  frames = await cardFrames(vp);
+  assert.ok(frames.length === 1 && frames[0].includes(vids[0]) && !frames[0].includes('mute=1'), String(frames));
+  await vp.waitForFunction(() => window.__yt);
+  await tap(vp, 1);
+  await settle(vp, 100);
+  assert.deepEqual(await cardFrames(vp), []);
+  assert.deepEqual((await calls(vp))[0], ['new', vids[1], 0]);
+  assert.equal((await layerOn(vp, 1)).off <= 1, true);
+  // Back on: a tap during the settle wait of a scroll wins over the pick that scroll started.
+  await vp.click('[data-testid=autoplay-toggle]');
+  await settle(vp);
+  await centre(vp, 1);
+  await settle(vp);
+  await centre(vp, 0);
+  await vp.waitForTimeout(100);
+  await tap(vp, 2);
+  await settle(vp);
+  assert.deepEqual(await last(vp), ['load', vids[2], 0]);
+  ok('the Autoplay switch is kept per device; a tap plays at once and wins over a pending pick');
+
+  vp = await videoPage({ api: 'abort' });
+  await centre(vp, 0);
+  await settle(vp);
+  await vp.waitForFunction(() => document.querySelector('.yt-box iframe'));
+  frames = await cardFrames(vp);
+  assert.ok(frames.length === 1 && frames[0].includes(vids[0]) && frames[0].includes('mute=1'), String(frames));
+  ok('without the IFrame API, videos play in per-card players');
+
+  vp = await videoPage({ noReady: true });
+  await centre(vp, 0);
+  await settle(vp);
+  assert.equal((await layerOn(vp, 0)).shown, true);
+  await vp.waitForFunction(() => document.querySelector('.yt-box iframe'), null, { timeout: 7000 });
+  assert.equal((await layerOn(vp, 0)).shown, false);
+  ok('a player that is not ready in 5 s gives way to a per-card player');
+
+  vp = await videoPage({ delay: 2000 });
+  await centre(vp, 0);
+  await settle(vp);
+  await toBottom(vp);
+  await settle(vp);
+  await vp.waitForFunction(() => window.__yt, null, { timeout: 5000 });
+  await settle(vp, 300);
+  assert.deepEqual(await calls(vp), []);
+  assert.deepEqual(await cardFrames(vp), []);
+  vp = await videoPage({ delay: 2000 });
+  await tap(vp, 0);
+  assert.equal((await cardFrames(vp)).length, 1);
+  ok('a video that scrolled away while the API loaded never starts; a tap while it loads plays in the card at once');
+  for (const c of contexts) await c.close();
 
   assert.deepEqual(errors, []);
   ok('no page errors');

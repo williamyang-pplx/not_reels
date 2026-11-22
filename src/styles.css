@@ -95,6 +95,11 @@ button { -webkit-user-select: none; user-select: none; }
 .yt-play { position: absolute; left: 50%; top: 50%; width: 68px; height: 48px; margin: -24px 0 0 -34px; border-radius: 14px; background: rgba(23,23,23,.85); transition: background-color .15s; }
 .yt-play::after { content: ''; position: absolute; left: 28px; top: 14px; border-style: solid; border-width: 10px 0 10px 16px; border-color: transparent transparent transparent #fff; }
 .yt:active .yt-play, .yt:hover .yt-play { background: #f00; }
+/* YouTube's minimum player size is 200×200 (an iPhone card's 16:9 box is ~187 px tall); the thumbnail crops. */
+.yt-box { min-height: 200px; }
+/* The one layer player, laid over the playing card's .yt-box by client/youtube.ts; under the sticky nav (z-40). */
+.yt-layer { position: absolute; z-index: 30; overflow: hidden; border-radius: .375rem; }
+.yt-layer iframe { display: block; border: 0; }
 
 /* The Redlib sheet (a post with its comments, or a live subreddit): full screen, above the nav. */
 .viewer { position: fixed; inset: 0; z-index: 55; display: flex; flex-direction: column; background: hsl(0 0% 4%); padding-top: env(safe-area-inset-top); overscroll-behavior: contain; }

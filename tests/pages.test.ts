@@ -48,6 +48,12 @@ describe('GET /', () => {
     expect(body).toContain('name="apple-mobile-web-app-status-bar-style" content="black-translucent"');
   });
 
+  it("sends no Referrer-Policy (YouTube's player needs the Referer)", async () => {
+    for (const path of ['/', '/saved', '/manage', '/api/topics']) {
+      expect((await request(path)).headers.get('Referrer-Policy'), path).toBeNull();
+    }
+  });
+
   it('sets the Content-Security-Policy header on pages, API and static responses', async () => {
     expect((await request('/')).headers.get('Content-Security-Policy')).toBe(CSP);
     expect((await request('/api/topics')).headers.get('Content-Security-Policy')).toBe(CSP);

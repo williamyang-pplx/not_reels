@@ -19,14 +19,15 @@ The design is in `documentation/low_level_plan.md` and `documentation/framework_
 - **DB:** better-sqlite3 with raw SQL (`src/db.ts`). The schema matches the old Prisma one, and dates are integer ms. Reads shared by the API and pages
   are in `src/lib/queries.ts`. Saved and hidden URLs are excluded **inside the SQL** (`NOT IN (SELECT url …)`). Keep it there.
 - **"Primary topic"** is the lowest topic slug (FeedTopic PK order). It drives Save, the border color, the badge and topic balance.
-- **Client** (`client/app.ts`, the only browser JS):
+- **Client** (`client/app.ts`, plus `client/youtube.ts` bundled into the same script; the only browser JS):
   - It swaps `#app` with `X-Partial: 1` fragments from a view cache (fresh for 30 s; `invalidate()` mirrors the
     old React Query keys) and prefetches on `pointerdown`.
   - Save, Hide and saved-link Delete are optimistic: the card leaves on tap and comes back on error.
   - Sort is client state. It is kept across pill changes on `/` and reset when `/` is entered from another page. It never goes in the URL.
-  - YouTube: one player at a time. With the nav's Autoplay switch on (localStorage), the most centered video box
-    plays muted once scrolling settles; a view load or revalidation holds it (`holdAutoplay`) so a swap never cuts
-    off a video it just started.
+  - YouTube (`client/youtube.ts`): one player at a time, normally one IFrame-API player laid over the playing
+    card's box and switched with `loadVideoById` (per-card iframes are the fallback). Autoplay picks the most
+    centered box once scrolling settles; view loads hold it (`holdAutoplay`). Never set a Referrer-Policy that
+    drops the Referer: YouTube's player needs it.
 - **Service worker** (`client/sw.ts`): stale-while-revalidate for top-level loads of `/`, `/saved` and `/manage` (never frame navigations, so a Redlib page in the sheet that reaches `/` hits the server's redirect); cache-first for hashed assets.
   Pages carry `data-rendered`. The client revalidates a page that is older than 5 s.
   Pages carry `data-build` (CSS + JS hash) and page/partial responses send `X-Build`. On a mismatch the client drops
