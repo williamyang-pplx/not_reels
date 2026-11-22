@@ -80,7 +80,7 @@ export function NavBar({ path, topic, topics }: { path: string; topic: string; t
           Not Brain Rot
         </a>
         <div class="flex items-center gap-3">
-          {/* Rendered on; the client sets aria-pressed from localStorage on every render (client/app.ts watchVideos). */}
+          {/* Rendered on; the client sets aria-pressed from localStorage on every render (client/youtube.ts watchVideos). */}
           <button type="button" data-act="autoplay" data-testid="autoplay-toggle" aria-pressed="true" class="autoplay text-sm px-1 py-1">
             Autoplay
           </button>

@@ -13,6 +13,7 @@ interface YTPlayer {
   isMuted(): boolean;
   getCurrentTime(): number;
   getVideoData(): { video_id: string };
+  getPlayerState(): number; // 0: ended
 }
 interface YTPlayerOptions {
   host: string;
@@ -23,7 +24,6 @@ interface YTPlayerOptions {
   events: {
     onReady(): void;
     onError(): void;
-    onStateChange(e: { data: number }): void;
     onAutoplayBlocked(): void;
   };
 }
@@ -54,7 +54,6 @@ let yt: YTPlayer | null = null;
 let ytReady = false; // the player's onReady fired; before it, its methods don't exist
 let layer: HTMLElement | null = null;
 const resumeAt = new Map<string, number>(); // video ID → whole seconds
-let endedId: string | null = null; // the layer video that played to its end (it starts over next time)
 const failed = new Set<string>(); // video IDs that errored in the layer player; they use per-card players
 /**
  * Boxes in frame, kept by an observer: measuring every box on each settle would force the layout that
@@ -245,7 +244,6 @@ function playInLayer(): void {
   layer.hidden = false;
   placeLayer();
   const start = resumeAt.get(current.id) ?? 0;
-  endedId = null;
   if (!yt) createPlayer(start);
   else if (ytReady) yt.loadVideoById({ videoId: current.id, startSeconds: start });
   // created but not ready yet: onReady loads `current`
@@ -308,11 +306,6 @@ function createPlayer(start: number): void {
         if (current.id !== created) player.loadVideoById({ videoId: current.id, startSeconds: resumeAt.get(current.id) ?? 0 });
       },
       onError: onPlayerError,
-      onStateChange: (e) => {
-        if (e.data !== 0 || !current || current.card) return; // 0: ended
-        endedId = current.id;
-        resumeAt.delete(current.id);
-      },
       onAutoplayBlocked,
     },
   });
@@ -326,11 +319,8 @@ function createPlayer(start: number): void {
  */
 function onPlayerError(): void {
   if (!current || current.card || !yt || yt.getVideoData().video_id !== current.id) return;
-  const { box, id, autoplayed } = current;
-  failed.add(id);
-  stopPlayer();
-  current = { box, id, autoplayed };
-  playInCard();
+  failed.add(current.id);
+  play(current.box, current.autoplayed);
 }
 
 /**
@@ -357,7 +347,7 @@ function placeLayer(): void {
 
 /** Remember where the layer video is, in whole seconds (an ended video starts over). */
 function savePosition(): void {
-  if (yt && ytReady && current && !current.card && endedId !== current.id) {
-    resumeAt.set(current.id, Math.floor(yt.getCurrentTime()));
-  }
+  if (!yt || !ytReady || !current || current.card) return;
+  if (yt.getPlayerState() === 0) resumeAt.delete(current.id);
+  else resumeAt.set(current.id, Math.floor(yt.getCurrentTime()));
 }

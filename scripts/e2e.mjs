@@ -321,7 +321,7 @@ INSERT INTO FeedItem (id,feedId,guid,title,link,publishedAt,sourceRank,fetchedAt
   // The fake YT.Player: an about:blank frame in place of its element; methods only after onReady (as the real one),
   // which fires after 10 ms unless window.__ytNoReady; every call is logged in window.__yt.calls.
   const FAKE_YT = `(() => {
-    const yt = (window.__yt = { calls: [], time: 0, muted: true, videoId: null, player: null });
+    const yt = (window.__yt = { calls: [], time: 0, state: 1, muted: true, videoId: null, player: null });
     const methods = {
       loadVideoById(a) { this.id = a.videoId; yt.calls.push(['load', a.videoId, a.startSeconds]); },
       playVideo() { yt.calls.push(['play']); },
@@ -330,6 +330,7 @@ INSERT INTO FeedItem (id,feedId,guid,title,link,publishedAt,sourceRank,fetchedAt
       isMuted() { return yt.muted; },
       getCurrentTime() { return yt.time; },
       getVideoData() { return { video_id: yt.videoId ?? this.id }; },
+      getPlayerState() { return yt.state; },
     };
     class Player {
       constructor(el, o) {
@@ -429,10 +430,10 @@ INSERT INTO FeedItem (id,feedId,guid,title,link,publishedAt,sourceRank,fetchedAt
   assert.ok(!(await calls(vp)).slice(callsBefore).some((c) => c[0] === 'mute'), 'an unmuted player stays unmuted');
   await fire(vp, 'onAutoplayBlocked');
   assert.deepEqual((await calls(vp)).slice(-2), [['mute'], ['play']]);
-  await fire(vp, 'onStateChange', { data: 0 });
-  await vp.evaluate(() => (window.__yt.time = 99));
+  await vp.evaluate(() => Object.assign(window.__yt, { state: 0, time: 99 })); // video 2 ended
   await centre(vp, 1);
   await settle(vp);
+  await vp.evaluate(() => (window.__yt.state = 1));
   await centre(vp, 2);
   await settle(vp);
   assert.deepEqual(await last(vp), ['load', vids[2], 0]);
