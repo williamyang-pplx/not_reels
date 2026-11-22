@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { parseLegacySubredditRssUrl, parseSubredditFeedUrl, subredditFeedUrl } from './lib/reddit-feeds';
+import { parseYouTubeChannelUrl, youTubeFeedUrl } from './lib/youtube-api';
 
 export type DB = Database.Database;
 
@@ -58,7 +59,12 @@ CREATE TABLE IF NOT EXISTS "Feed" (
   "fetchErrorCount" INTEGER NOT NULL DEFAULT 0,
   "lastFetched" DATETIME,
   "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  "updatedAt" DATETIME NOT NULL
+  "updatedAt" DATETIME NOT NULL,
+  "publishedAfter" DATETIME,
+  "publishedBefore" DATETIME,
+  "includeShorts" BOOLEAN,
+  "showRecent" BOOLEAN,
+  "showArchive" BOOLEAN
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "Feed_url_key" ON "Feed"("url");
 CREATE INDEX IF NOT EXISTS "Feed_sourceKind_idx" ON "Feed"("sourceKind");
@@ -82,6 +88,7 @@ CREATE TABLE IF NOT EXISTS "FeedItem" (
   "sourceRank" INTEGER,
   "fetchedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "media" TEXT,
+  "uploadedAt" DATETIME,
   CONSTRAINT "FeedItem_feedId_fkey" FOREIGN KEY ("feedId") REFERENCES "Feed" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "FeedItem_feedId_guid_key" ON "FeedItem"("feedId", "guid");
@@ -107,11 +114,29 @@ CREATE TABLE IF NOT EXISTS "HiddenLink" (
   "hiddenAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "HiddenLink_url_key" ON "HiddenLink"("url");
+CREATE TABLE IF NOT EXISTS "YouTubeVideo" (
+  "videoId" TEXT NOT NULL PRIMARY KEY,
+  "channelId" TEXT NOT NULL,
+  "title" TEXT NOT NULL,
+  "summary" TEXT,
+  "author" TEXT,
+  "uploadedAt" DATETIME NOT NULL,
+  "isShort" BOOLEAN NOT NULL DEFAULT false,
+  "lastShownAt" DATETIME
+);
+CREATE INDEX IF NOT EXISTS "YouTubeVideo_channelId_uploadedAt_idx" ON "YouTubeVideo"("channelId", "uploadedAt");
+CREATE TABLE IF NOT EXISTS "YouTubeChannel" (
+  "channelId" TEXT NOT NULL PRIMARY KEY,
+  "filledAt" DATETIME,
+  "fillError" TEXT
+);
 `);
   dropLegacyFeedType(conn);
   addTopicPosition(conn);
   convertSubredditFeeds(conn);
   addFeedItemMedia(conn);
+  addFeedYouTubeSettings(conn);
+  convertYouTubeRssFeeds(conn);
 }
 
 /** Drop the old FORUM/BLOG column (and its index, which SQLite requires first). No-op once gone. */
@@ -149,24 +174,37 @@ function convertSubredditFeeds(conn: DB): void {
     const url = subredditFeedUrl(sub);
     return row.sourceKind === 'REDDIT' && row.url === url ? [] : [{ id: row.id, url }];
   });
+  moveFeedsToUrls(conn, changes, 'REDDIT', true);
+}
+
+/**
+ * Point each feed in `changes` at its new URL with `sourceKind`, deleting its stored items when `dropItems`. A feed
+ * whose new URL another feed already has is folded into that one (topics merged, row deleted, its items cascade).
+ */
+function moveFeedsToUrls(
+  conn: DB,
+  changes: { id: string; url: string }[],
+  sourceKind: 'REDDIT' | 'YOUTUBE',
+  dropItems: boolean,
+): void {
   if (changes.length === 0) return;
   const owner = conn.prepare('SELECT "id" FROM "Feed" WHERE "url" = ? AND "id" != ?');
   const mergeTopics = conn.prepare(
     'INSERT OR IGNORE INTO "FeedTopic" ("feedId", "topicSlug") SELECT ?, "topicSlug" FROM "FeedTopic" WHERE "feedId" = ?',
   );
   const convert = conn.prepare(
-    `UPDATE "Feed" SET "sourceKind" = 'REDDIT', "url" = ?, "fetchErrorCount" = 0, "updatedAt" = ? WHERE "id" = ?`,
+    'UPDATE "Feed" SET "sourceKind" = ?, "url" = ?, "fetchErrorCount" = 0, "updatedAt" = ? WHERE "id" = ?',
   );
-  const dropItems = conn.prepare('DELETE FROM "FeedItem" WHERE "feedId" = ?');
+  const deleteItems = conn.prepare('DELETE FROM "FeedItem" WHERE "feedId" = ?');
   const dropTopics = conn.prepare('DELETE FROM "FeedTopic" WHERE "feedId" = ?');
   const dropFeed = conn.prepare('DELETE FROM "Feed" WHERE "id" = ?');
   conn.transaction(() => {
     const now = Date.now();
     for (const { id, url } of changes) {
-      dropItems.run(id);
+      if (dropItems) deleteItems.run(id);
       const kept = owner.get(url, id) as { id: string } | undefined;
       if (!kept) {
-        convert.run(url, now, id);
+        convert.run(sourceKind, url, now, id);
         continue;
       }
       mergeTopics.run(kept.id, id);
@@ -180,6 +218,45 @@ function convertSubredditFeeds(conn: DB): void {
 function addFeedItemMedia(conn: DB): void {
   if (conn.prepare(`SELECT 1 FROM pragma_table_info('FeedItem') WHERE "name" = 'media'`).get()) return;
   conn.exec('ALTER TABLE "FeedItem" ADD COLUMN "media" TEXT');
+}
+
+/** Add `column` to `table` unless the table has it already. */
+function addColumnIfMissing(conn: DB, table: string, column: string, type: string): void {
+  if (conn.prepare(`SELECT 1 FROM pragma_table_info('${table}') WHERE "name" = ?`).get(column)) return;
+  conn.exec(`ALTER TABLE "${table}" ADD COLUMN "${column}" ${type}`);
+}
+
+/**
+ * Add the YouTube columns to an older DB: Feed's range, Shorts, Recent and Archive settings, and FeedItem.uploadedAt.
+ * Each column is checked on its own (a DB from an earlier build of this branch has only the first three).
+ * YouTubeVideo and YouTubeChannel come from CREATE TABLE IF NOT EXISTS.
+ */
+function addFeedYouTubeSettings(conn: DB): void {
+  conn.transaction(() => {
+    addColumnIfMissing(conn, 'Feed', 'publishedAfter', 'DATETIME');
+    addColumnIfMissing(conn, 'Feed', 'publishedBefore', 'DATETIME');
+    addColumnIfMissing(conn, 'Feed', 'includeShorts', 'BOOLEAN');
+    addColumnIfMissing(conn, 'Feed', 'showRecent', 'BOOLEAN');
+    addColumnIfMissing(conn, 'Feed', 'showArchive', 'BOOLEAN');
+    addColumnIfMissing(conn, 'FeedItem', 'uploadedAt', 'DATETIME');
+  })();
+}
+
+/**
+ * Turn YouTube channel RSS feeds (/feeds/videos.xml?channel_id=UC…) into YOUTUBE feeds under
+ * https://www.youtube.com/channel/UC…, with no date range and the settings left null: Recent and Archive on, Shorts
+ * off. Their items stay: a YOUTUBE refresh writes the same guid and link. A duplicate is folded into the oldest.
+ * Playlist and user feeds stay RSS. Runs at every boot; once every channel feed is converted it is a no-op.
+ */
+function convertYouTubeRssFeeds(conn: DB): void {
+  const rows = conn
+    .prepare(`SELECT "id", "url" FROM "Feed" WHERE "sourceKind" = 'RSS' ORDER BY "createdAt", rowid`)
+    .all() as { id: string; url: string }[];
+  const changes = rows.flatMap((row) => {
+    const ref = parseYouTubeChannelUrl(row.url);
+    return ref && 'channelId' in ref ? [{ id: row.id, url: youTubeFeedUrl(ref.channelId) }] : [];
+  });
+  moveFeedsToUrls(conn, changes, 'YOUTUBE', false);
 }
 
 /** Run `fn` inside a transaction on the shared connection. */

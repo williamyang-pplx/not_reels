@@ -77,12 +77,17 @@ model Feed {
   id              String      @id @default(cuid())
   name            String
   url             String      @unique   // http(s) URL or "local/<provider_id>"
-  sourceKind      String      @default("RSS")   // "RSS" | "LOCAL" | "REDDIT" (inferred from url)
+  sourceKind      String      @default("RSS")   // "RSS" | "LOCAL" | "REDDIT" | "YOUTUBE" (inferred from url)
   isActive        Boolean     @default(true)
   fetchErrorCount Int         @default(0)
   lastFetched     DateTime?
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
+  publishedAfter  DateTime?                     // YOUTUBE only: range start (inclusive, 00:00 UTC of the start day)
+  publishedBefore DateTime?                     // YOUTUBE only: range end (exclusive, 00:00 UTC of the day after the end day)
+  includeShorts   Boolean?                      // YOUTUBE only; null (a converted RSS feed) means no Shorts
+  showRecent      Boolean?                      // YOUTUBE only: show the channel's RSS videos; null means on
+  showArchive     Boolean?                      // YOUTUBE only: pick videos from the channel's archive; null means on
   items           FeedItem[]
   topics          FeedTopic[]
   @@index([type])
@@ -110,6 +115,7 @@ model FeedItem {
   sourceRank  Int?                     // position in the source feed (0 = top); 10000 = stale
   fetchedAt   DateTime @default(now())
   media       String?                  // JSON RedditMedia for Reddit posts (§7.1); null otherwise
+  uploadedAt  DateTime?                // a YouTube video's upload date (§7.2); null otherwise
   feed        Feed     @relation(fields: [feedId], references: [id], onDelete: Cascade)
   @@unique([feedId, guid])
   @@index([feedId]) @@index([publishedAt]) @@index([feedId, publishedAt]) @@index([feedId, sourceRank])
@@ -131,17 +137,37 @@ model HiddenLink {
   url      String   @unique
   hiddenAt DateTime @default(now())
 }
+
+model YouTubeVideo {                   // §7.2: every known video of a channel (no relation: survives its feed)
+  videoId     String   @id
+  channelId   String
+  title       String
+  summary     String?                  // cleaned description, at most 1,000 characters
+  author      String?
+  uploadedAt  DateTime
+  isShort     Boolean  @default(false)
+  lastShownAt DateTime?                // set when an archive or RSS post with this video is stored
+  @@index([channelId, uploadedAt])
+}
+
+model YouTubeChannel {                 // §7.2: a channel's one-time back catalog fill
+  channelId String    @id
+  filledAt  DateTime?                  // set once the fill finished
+  fillError String?                    // the last failure's reason
+}
 ```
 
 ### Constants (`lib/constants.ts`)
 | Name | Value |
 |---|---|
-| `FEED_SOURCE_KINDS` | `['RSS','LOCAL','REDDIT']` |
+| `FEED_SOURCE_KINDS` | `['RSS','LOCAL','REDDIT','YOUTUBE']` |
 | `LOCAL_FEED_PREFIX` | `'local/'` |
 | `DEFAULT_TOPICS` | NEWS/News, MUSIC/Music, LITERATURE/Literature, TECHNOLOGY/Tech, SCIENCE/Science, CULTURE/Culture, POLITICS/Politics, OTHER/Other (in this order) |
 | `PAGE_SIZE_DEFAULT` / `PAGE_SIZE_MAX` | 50 / 100 |
 | `RELEVANT_FETCH_SIZE` | 200 (candidate pool for Hot and Random) |
 | `MAX_ITEMS_PER_FEED` | 30 |
+| `YOUTUBE_ARCHIVE_PICKS` | 30 (archive picks per YOUTUBE refresh, §7.2) |
+| `YOUTUBE_FILL_MAX_PAGES` | 400 (playlistItems pages a channel fill reads per playlist, §7.2) |
 | `FETCH_CONCURRENCY` | 12 |
 
 ### Default topic seeding
@@ -161,6 +187,7 @@ All routes are `force-dynamic`. Routes that fetch or refresh feeds use `runtime 
 - `DUPLICATE` (409)
 - `NOT_FOUND` (404)
 - `CONSTRAINT` (409)
+- `YOUTUBE_UNAVAILABLE`: 503 when a handle lookup needs `YOUTUBE_API_KEY` and it is unset, 502 when the lookup request fails (§7.2).
 
 Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJson(req, schema)` and `parseQuery(url, schema)`.
 
@@ -191,17 +218,19 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
 - **`GET /api/feeds?topic=`**:
   - Optional `topic` filter (`ALL` means no filter). Matches feeds that have that topic.
   - Ordered by `createdAt desc`.
-  - Each feed is returned with `topics: string[]` (flattened slugs).
-- **`POST /api/feeds`**:
-  1. Validate the body.
-  2. If the URL exists, return 409 `DUPLICATE` `"Feed URL already exists"`.
-  3. If any topic slug is unknown, return 400 `"Unknown topic: X"` or `"Unknown topics: X, Y"`.
-  4. Create the feed with `sourceKind` inferred: `LOCAL` if the URL parses as a local feed URL, else `REDDIT` if it is a subreddit page (§7.1; the stored URL is its canonical page URL), else `RSS`. Create the FeedTopic rows.
-  5. **Run one refresh of this feed synchronously before responding.** It is best-effort; errors are only logged.
-  6. Re-read the feed and return 201 with the flattened feed. It reflects `lastFetched` and `fetchErrorCount`.
-- **`PATCH /api/feeds/:id`** `{name?, topics?, isActive?}`:
+  - Each feed is returned with `topics: string[]` (flattened slugs) and `youtube: {recent, archive, includeShorts, startDate, endDate, archiveSize, archiveFilled, archiveError} | null` (set only for YOUTUBE feeds; the last three describe the channel's archive, §7.2).
+- **`POST /api/feeds`** `{name, url, topics, recent?, archive?, includeShorts?, startDate?, endDate?}`:
+  1. Validate the body. `startDate` and `endDate` are `YYYY-MM-DD` UTC days or null, the end day included; an end before the start is a 400 `"End date is before start date"`; `recent` and `archive` both false is a 400 `"Turn on Recent or Archive"`. A YouTube URL that is not a channel is a 400 `"YouTube feeds must be a channel URL, like https://www.youtube.com/@name"` (`/feeds/videos.xml` playlist and user feeds stay addable as RSS).
+  2. If any topic slug is unknown, return 400 `"Unknown topic: X"` or `"Unknown topics: X, Y"`.
+  3. If the URL exists, return 409 `DUPLICATE` `"Feed URL already exists"`.
+  4. A YouTube channel URL becomes its stored form `https://www.youtube.com/channel/UC…` (§7.2; a handle costs one lookup: unknown → 400 `"YouTube channel not found"`, no key → 503, lookup failed → 502). 409 if that URL exists. Any YouTube field on any other URL is a 400 `"Only YouTube feeds take dates or Recent, Archive and Shorts settings"`.
+  5. Create the feed with `sourceKind` inferred: `LOCAL` if the URL parses as a local feed URL, else `REDDIT` if it is a subreddit page (§7.1; the stored URL is its canonical page URL), else `YOUTUBE` for a stored channel URL (with its settings; `recent` and `archive` default to true, `includeShorts` to false), else `RSS`. Create the FeedTopic rows.
+  6. **Run one refresh of this feed synchronously before responding.** It is best-effort; errors are only logged.
+  7. Re-read the feed and return 201 with the flattened feed. It reflects `lastFetched` and `fetchErrorCount`.
+- **`PATCH /api/feeds/:id`** `{name?, topics?, isActive?, url?, recent?, archive?, includeShorts?, startDate?, endDate?}`:
   - 404 if the feed is missing. Unknown topics give a 400 with the same message as POST.
-  - In one transaction: update the scalar fields if any. If `topics` is given, delete all FeedTopic rows for the feed and recreate them.
+  - `url`, `recent`, `archive`, `includeShorts`, `startDate` and `endDate` are for YOUTUBE feeds only (400 `"Only YouTube feeds take a channel URL, dates or Recent, Archive and Shorts settings"` otherwise). Given fields replace the stored ones (`null` clears a date); the merged range must not be inverted and the merged toggles must not both be off (400), checked before any handle lookup. A new `url` must be a channel URL (400) that no other feed has (409).
+  - In one transaction: update the scalar fields if any. If `topics` is given, delete all FeedTopic rows for the feed and recreate them. If the URL or a YouTube setting changed (compared as stored values, so resaving the same settings changes nothing), write them and delete the feed's items; after the transaction, refresh the feed once (best-effort, as in POST; with Archive on it also starts the channel's fill). A failed refetch leaves the feed empty until the next refresh.
   - Returns the flattened feed.
   - Setting `isActive` does **not** reset `fetchErrorCount`.
 - **`DELETE /api/feeds/:id`**: 404 if missing. Deletes the feed (items and FeedTopic rows cascade). Returns `{id}`.
@@ -225,7 +254,7 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
   - If `cursor` is given (ISO datetime; invalid gives 400 `"Invalid cursor"`), add `publishedAt < cursor`.
   - Fetch `limit+1` items ordered by `publishedAt desc`.
   - If there are more than `limit` items, `nextCursor` is the last returned item's `publishedAt` as an ISO string.
-- **Item shape:** `{ id, feedId, guid, title, link, summary, author, publishedAt (ISO), feedName, feedUrl, feedTopics: string[] }`.
+- **Item shape:** `{ id, feedId, guid, title, link, summary, author, publishedAt (ISO), feedName, feedUrl, feedTopics: string[], media, uploadedAt (ISO, YouTube videos only, else null) }`.
 
 **`POST /api/feed-items/refresh`** `{feedId?}`
 - With `feedId`: 404 `"Feed not found"` if missing. Otherwise call `refreshSingleFeed`. This runs even if the feed is inactive. Returns `{ refreshed: 0|1, newItems, failed: 0|1 }`.
@@ -244,7 +273,7 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
 ## 5. Feed refresh pipeline
 
 ### 5.1 `refreshAllFeeds()`
-1. Load every **active** feed. Refresh each one as in §5.2: RSS and LOCAL feeds through one `p-limit(FETCH_CONCURRENCY=12)` limiter, REDDIT feeds one at a time in their own `p-limit(1)` (each is two Redlib requests), both in the same pass.
+1. Load every **active** feed. Refresh each one as in §5.2: RSS, LOCAL and YOUTUBE feeds through one `p-limit(FETCH_CONCURRENCY=12)` limiter, REDDIT feeds one at a time in their own `p-limit(1)` (each is two Redlib requests), both in the same pass. A YOUTUBE refresh may start a detached archive fill (§7.2), which the pass does not wait for.
 2. A REDDIT feed's posts come from Redlib (§7.1). With `REDLIB_URL` unset it fails like any feed error (creating one then records a failed first fetch).
 3. For the result: `refreshed` counts successes, `failed` counts failures, and `newItems` is the sum of `newItems`.
 
@@ -255,13 +284,14 @@ Make the fetcher, the local provider registry and the concurrency injectable thr
 2. Get normalized items:
    - **LOCAL:** parse the provider id from the URL and look up the provider; throw if either is invalid. Call `provider({ feed: {id,name,url,sourceKind}, now })`, then run `normalizeLocalFeedItems` on the result (§5.5).
    - **REDDIT:** read the subreddit from Redlib (§7.1): its RSS output and its HTML listing, merged into items with `media`.
+   - **YOUTUBE:** the channel's recent RSS videos and archive picks (§7.2), with no API call. With Archive on and the channel unfilled, it first starts the fill without waiting.
    - **RSS:** call `fetcher(url)` and normalize all items (§5.4). `sourceRank` is the item's index in the feed.
    - Any other `sourceKind` throws.
-3. **Upsert:**
+3. **Upsert** (a YOUTUBE feed whose URL or settings changed in the DB while it was fetched stores nothing and returns `{newItems:0, ok:true}`; the edit's own refetch stores the new batch):
    - For each item, upsert on `(feedId, guid)`. On create, set all fields. On update, overwrite title, link, summary, author, publishedAt and sourceRank. Count only the rows that are actually new.
    - Then set `sourceRank = 10000` on every item in this feed whose guid was **not** in this fetch. These are "stale" items.
 4. Set `lastFetched = now` and `fetchErrorCount = 0`.
-5. **Prune:** keep the top N items ordered by `sourceRank asc, publishedAt desc` and delete the rest. N is **30** for every feed (`MAX_ITEMS_PER_FEED`; for `local/rym_music_recs` it is `RYM_ITEMS_PER_REFRESH`, one batch, also 30).
+5. **Prune:** keep the top N items ordered by `sourceRank asc, publishedAt desc` and delete the rest. N is **30** for every feed (`MAX_ITEMS_PER_FEED`; for `local/rym_music_recs` it is `RYM_ITEMS_PER_REFRESH`, one batch, also 30). A YOUTUBE feed keeps exactly this refresh's batch (up to 15 + 30), and its videos' `lastShownAt` is set in the same transaction.
 6. Return `{newItems, ok:true}`.
 7. **If any step throws:** increment `fetchErrorCount`. The feed stays active; only the user pauses feeds. Log `[feed-refresh] failed feed=<id> url=<url>:` and the error. Return `{newItems:0, ok:false}`.
 
@@ -279,7 +309,7 @@ Make the fetcher, the local provider registry and the concurrency injectable thr
 | `guid` | the first non-empty trimmed value of `guid` or `link`. If both are empty, use the sha256 hex of `` `${title}|${isoDate ?? pubDate ?? ''}` `` |
 | `title` | trimmed `title`, or `"(untitled)"` |
 | `link` | trimmed `link`, or `""` |
-| `summary` | the **longest** trimmed text among: `content:encodedSnippet` (the text of `<content:encoded>`), `contentSnippet ?? content`, Atom `<summary>` with tags removed, and YouTube's `<media:group><media:description>` without link, timestamp, divider, hashtag and empty-label lines and without its credits roll. Empty becomes null |
+| `summary` | the **longest** trimmed text among: `content:encodedSnippet` (the text of `<content:encoded>`), `contentSnippet ?? content`, Atom `<summary>` with tags removed, and YouTube's `<media:group><media:description>` without link, timestamp, divider, hashtag and empty-label lines and without its credits roll (`cleanVideoDescription` in `lib/utils.ts`, shared with §7.2). Empty becomes null |
 | `author` | `creator` if defined, else `author`; trimmed; empty becomes null |
 | `publishedAt` | parse `isoDate ?? pubDate`. If it is missing or invalid, use `now` |
 | `sourceRank` | the item's index in the source feed |
@@ -388,6 +418,18 @@ Reddit ended RSS support on 2026-11-13, and its thread JSON needs a login. Subre
 - **Without `REDLIB_URL`:** REDDIT refreshes fail, Reddit cards are plain cards (no media, no sheet), and there is no viewer.
 - **Revalidation:** a view where the user has scrolled or tapped inside a frame is never replaced by a background revalidation, and the launch-time "unchanged since render" check ignores frame `src` attributes.
 
+### 7.2 YouTube channels
+A YouTube channel feed (`sourceKind = YOUTUBE`) has two sources, each switched on or off per feed: **Recent**, the channel's RSS feed, and **Archive**, the `YouTubeVideo` table. A refresh never calls the YouTube Data API. The API, with `YOUTUBE_API_KEY` (§10), is used for handle lookups and for each channel's one-time back catalog fill. Code: `lib/youtube-api.ts` (URLs, handle lookup, playlist paging), `lib/youtube-archive.ts` (the table, picks, the fill), `lib/youtube-feeds.ts` (RSS and the refresh).
+- **URLs:** on a YouTube host, `/@<handle>` (with `/videos`, `/featured`, … after it), `/channel/UC…` and `/feeds/videos.xml?channel_id=UC…` are channel URLs. Each is stored as `https://www.youtube.com/channel/UC…`, so a channel is one feed (409 on a second). A handle costs one `channels.list?forHandle=@<handle>` call (1 quota unit) when the feed is added or its URL edited.
+- **Settings:** Recent and Archive (default on; not both off), Include Shorts (default off), and an optional date range (UTC days, end day included; stored as `publishedAfter` inclusive and `publishedBefore` exclusive, in ms) that filters archive picks only.
+- **Recent:** `GET https://www.youtube.com/feeds/videos.xml?channel_id=<id>`, the channel's 15 newest uploads. A `/shorts/<id>` link marks a Short; Shorts are dropped from the posts unless Shorts are on. Every RSS video, Shorts included, is saved to `YouTubeVideo` with `INSERT OR IGNORE`. Recent posts keep their RSS date as `publishedAt`.
+- **Archive:** each refresh picks `YOUTUBE_ARCHIVE_PICKS` (30) of the channel's `YouTubeVideo` rows inside the range, Shorts only when on, none of this refresh's recent videos: never-shown first, then the least recently shown, random among equals. An archive post's `publishedAt` is the refresh time, so a new batch counts as new, and a re-picked video is new again.
+- **Posts:** recent videos and picks interleave (recent, pick, recent, pick, …; `sourceRank` = position), so picks reach the Hot pool. Each post has `guid` = `link` = `https://www.youtube.com/watch?v=<id>` (what the RSS path stored, since YouTube's Atom entries have no `<guid>`), the title, the cleaned description (§5.4, at most 1,000 characters) as `summary`, the channel as `author`, and the upload date as `uploadedAt`. The batch replaces the previous one, and its videos' `lastShownAt` is set once it is stored.
+- **Fill:** a refresh with Archive on starts the channel's fill unless it is filled or running, without waiting for it (the one detached promise in the app). The fill pages the uploads playlist (`UU…`) and the Shorts playlist (`UUSH…`, to tag Shorts; a 404 `playlistNotFound` is an empty list) with `playlistItems.list` (50 a page, 1 unit each, at most `YOUTUBE_FILL_MAX_PAGES` = 400 pages per playlist), saves every video (a Short's tag from `UUSH` overrides an RSS row's), sets `YouTubeChannel.filledAt` (also when a playlist was cut at the cap) and then refreshes the feed. A failure stores its reason in `fillError`, is logged once as `[youtube] fill failed channel=<id>: <reason>`, and leaves the channel unfilled, so the next refresh tries again. Errors are `YouTube API <status> <reason>` and never hold a request URL, which carries the key.
+- **Quota:** a fill is about 1 unit per 50 videos, once per channel (~25 for 1,000 videos). Refreshes cost 0. A fill that keeps failing costs about 1 unit per refresh. Daily limit: 10,000 units.
+- **Boot conversion:** RSS feeds whose URL is `/feeds/videos.xml?channel_id=UC…` become `YOUTUBE` feeds under the channel URL, with no range and the settings null (Recent and Archive on, Shorts off). Their items are kept (same guid and link); one whose channel URL another feed already has is folded into the oldest, topics merged. Playlist and user RSS feeds stay RSS.
+- **Without `YOUTUBE_API_KEY`:** RSS refreshes and archive picks still work; adding or editing a feed by handle answers 503, and fills record `YOUTUBE_API_KEY is not set`.
+
 ## 8. Front end
 
 ### 8.1 Routes
@@ -435,7 +477,7 @@ All pages are `force-dynamic`. The root layout wraps the page in the React Query
 ### 8.4 FeedCard (standard)
 - **Container:** `rounded-lg border-2 bg-card p-4`, with the border color from the first feed topic (§7).
 - **Link area:** the whole top section is an `<a target=_blank rel="noopener noreferrer">` to `item.link`. It contains:
-  - Header row: the feed name (truncated, or `Unknown`) and the relative time.
+  - Header row: the feed name (truncated, or `Unknown`) and the relative time; for an item with `uploadedAt` (a YouTube video), ` · uploaded <d Mon yyyy>` after it (UTC, fixed English month abbreviations, e.g. `4 Sep 2014`).
   - The title.
   - The summary. A short one (60 words or fewer) is shown whole, with hard line wraps joined into paragraphs. A longer one shows its **first 60 words** with `…`, and a **More** button below the link area loads the whole text from `GET /_f/summary/:id` (plain text, reflowed into paragraphs) and shows it in place of the excerpt, in a panel just below the link area (so reading it never opens the article). The panel's max-height keeps the card at most **3×** its collapsed height; longer text scrolls inside the panel. The button then reads **Less**, which puts the excerpt back and scrolls the card top into view if it is under the nav. The text is fetched once per item. A failed load leaves the excerpt and sets the label to **Retry**.
 - **Embeds** below the link area:
@@ -488,17 +530,18 @@ An item uses this variant when `feedUrl === 'local/rym_music_recs'` or its guid 
    - Clicking × opens `window.confirm("Delete topic "<label>"? This will also delete all feeds and saved links under this topic.")`. If confirmed, it calls DELETE and invalidates topics, feeds, feed-items and saved-links.
 2. **"+ Add feed"** button. It opens the **Add a feed** modal, which has:
    - Name (required)
-   - URL (text, required, placeholder `https://example.com/rss.xml, https://www.reddit.com/r/sub or local/rym_music_recs`)
+   - URL (text, required, placeholder `https://example.com/rss.xml, https://www.youtube.com/@channel, https://www.reddit.com/r/sub or local/rym_music_recs`)
+   - YouTube fields (`youtube-fields`, a fieldset shown and enabled only while the URL's host is youtube.com, www., m. or music.; a disabled fieldset sends nothing): **Recent videos (RSS)** (`recent-checkbox`) and **From the archive** (`archive-checkbox`), both checked by default; Archive from / to dates; an **Include Shorts** checkbox (`include-shorts-checkbox`). Sent as `recent`, `archive`, `startDate`, `endDate` (empty → null) and `includeShorts`. With both boxes off, submit shows `Turn on Recent or Archive`.
    - A **TopicCheckboxList**
    - Buttons: Cancel and "Add feed" ("Adding…" while pending). Submit is disabled until at least one topic is checked, and it validates again on submit ("Pick at least one topic").
    - On success, the form resets, the modal closes and `['feeds']` is invalidated.
 3. **The feed list.** The states are `Loading…` and `No feeds yet. Add your first one above.`. Each feed row (a card) shows:
    - A TopicBadge for **every** topic, and a red uppercase `paused` tag when the feed is inactive.
-   - The name, and the URL (muted, `break-all`).
+   - The name, and the URL (muted, `break-all`). A YOUTUBE feed adds a muted settings line (`youtube-settings`): the sources with the archive's size or state, the range (archive on only) and Shorts, e.g. `Recent + archive (1,240 videos) · 2015-01-01 – 2017-12-31 · no Shorts`, `Recent only · Shorts`, `Archive only (not filled yet) · All dates · no Shorts`, `Recent + archive (fill failed) · …`.
    - Buttons:
      - **Refresh:** `POST /api/feed-items/refresh {feedId}`. It is disabled when the feed is paused, and it invalidates nothing.
      - **Pause/Resume:** PATCH `isActive`, then invalidate feeds and feed-items.
-     - **Edit:** opens the **Edit topics** modal. It shows the feed name, a TopicCheckboxList pre-filled with the feed's topics, and Save. At least one topic is required. Save runs PATCH `topics`, then invalidates feeds and feed-items.
+     - **Edit:** opens the **Edit feed** modal. It shows the feed name, a TopicCheckboxList pre-filled with the feed's topics, and Save. For a YOUTUBE feed it also shows the YouTube fields with the channel URL, pre-filled from the row (`data-url`, `data-recent`, `data-archive`, `data-start`, `data-end`, `data-shorts`). At least one topic is required. Save runs PATCH with `topics` (and `url`, `recent`, `archive`, `startDate`, `endDate`, `includeShorts` for a YOUTUBE feed), then invalidates feeds and feed-items.
      - **Delete:** red, **no confirm**. Runs DELETE, then invalidates feeds.
 
 **Modal pattern** (shared by all modals):
@@ -514,7 +557,7 @@ An item uses this variant when `feedUrl === 'local/rym_music_recs'` or its guid 
 - Feed page: `feed-list`, `refresh-button`, `refresh-status`, `shuffle-button`, `sort-{recommended|new}`, `sentinel`, `empty-state`.
 - Feed cards: `feed-card`, `comments-btn`, `save-feed-item-btn`, `hide-feed-item-btn`, `archive-feed-item-btn`, `youtube-music-feed-item-link`.
 - Saved page: `saved-link-card`, `saved-link-delete`, `add-saved-link-btn`, `add-saved-link-modal`.
-- Manage page: `add-feed-btn`, `add-feed-modal`, `edit-feed-modal`, `feed-row`, `feed-pause-btn`, `feed-edit-btn`, `feed-delete-btn`, `topics-manager`, `topic-input`, `add-topic-btn`, `topic-chip`, `move-topic-left-{slug}`, `move-topic-right-{slug}`, `delete-topic-{slug}`, `topic-checkbox-{slug}`.
+- Manage page: `add-feed-btn`, `add-feed-modal`, `edit-feed-modal`, `feed-row`, `feed-pause-btn`, `feed-edit-btn`, `feed-delete-btn`, `topics-manager`, `topic-input`, `add-topic-btn`, `topic-chip`, `move-topic-left-{slug}`, `move-topic-right-{slug}`, `delete-topic-{slug}`, `topic-checkbox-{slug}`, `youtube-fields`, `recent-checkbox`, `archive-checkbox`, `include-shorts-checkbox`, `youtube-settings`.
 
 ## 9. Visual design, PWA and security
 
@@ -562,6 +605,7 @@ media-src 'self' https:
 - `RYM_MUSIC_RECS_DB_PATH` and `RYM_MUSIC_RECS_PREFS_PATH`: optional overrides.
 - `REDLIB_URL`: optional base URL of the Redlib container (e.g. `http://127.0.0.1:8180`). Unset makes REDDIT refreshes fail and turns the Redlib sheet off (§7.1). The container needs `REDLIB_ENABLE_RSS=on`.
 - `IMAGE_CACHE_DIR`: optional directory for shrunk Reddit images (default `img-cache` next to the DB).
+- `YOUTUBE_API_KEY`: optional YouTube Data API v3 key. Unset makes handle lookups answer 503 and archive fills fail; RSS refreshes still work (§7.2).
 - The `sqlite3` CLI must be on `PATH` (the RYM provider needs it).
 - Scripts:
   - `dev`: `next dev`
@@ -579,7 +623,7 @@ media-src 'self' https:
   - The build stage installs the build tools and `openssl`, runs `pnpm install --frozen-lockfile --prod=false` and `prisma generate`, copies the source, runs `next build --experimental-build-mode compile`, then `pnpm prune --prod`.
   - The runtime stage installs `ca-certificates`, `openssl` and **`sqlite3`**. It creates the `/data` volume, sets `DATABASE_URL=file:///data/sqlite.db` and `EXPOSE 3000`, and runs `CMD pnpm run start`.
 - **`docker-entrypoint.js`:** if the command is `pnpm run start`, it first runs `pnpm exec prisma migrate deploy`, then runs the command.
-- **Redlib (§7.1):** the runtime stage copies `/usr/local/bin/redlib` from `ghcr.io/nachtalb/redlib:latest`. The command is `scripts/fly-start.sh`, which runs `redlib -a 127.0.0.1 -p 8080` in a restart loop and then `exec node dist/server.mjs`. `fly.toml` `[env]` sets `REDLIB_URL=http://127.0.0.1:8080` and Redlib's `REDLIB_DEFAULT_*` settings; a session cookie, if ever needed, goes in `fly secrets` as `REDLIB_REDDIT_COOKIE`.
+- **Redlib (§7.1):** the runtime stage copies `/usr/local/bin/redlib` from `ghcr.io/nachtalb/redlib:latest`. The command is `scripts/fly-start.sh`, which runs `redlib -a 127.0.0.1 -p 8080` in a restart loop and then `exec node dist/server.mjs`. `fly.toml` `[env]` sets `REDLIB_URL=http://127.0.0.1:8080` and Redlib's `REDLIB_DEFAULT_*` settings; a session cookie, if ever needed, goes in `fly secrets` as `REDLIB_REDDIT_COOKIE`. The YouTube key goes in `fly secrets` as `YOUTUBE_API_KEY`, used for handle lookups and archive fills (§7.2).
 - **`.dockerignore`:** `node_modules`, `.next`, `.env*`, logs, `prisma/dev.db*`, `prisma/test.db*`, `coverage`. Note that `data/rym_data.db` **is** included in the image.
 - **`fly.toml`:**
   - App `not-reels`, region `ams`.
@@ -602,15 +646,19 @@ Write Vitest suites with the same coverage as these existing files:
   - Prunes to 30, and RYM to one batch of 30.
   - Increments the error count and never deactivates the feed.
   - Refreshes `REDDIT` feeds from Redlib (stub RSS and page fetchers), and fails them when `REDLIB_URL` is unset.
+  - Refreshes `YOUTUBE` feeds from RSS and the archive (stub RSS fetcher), replaces the archive batch, marks a batch shown once stored, stores `uploadedAt`, starts the fill and refreshes the feed after it, and drops a fetch whose settings changed while it ran.
   - Resets the error count on success.
   - Skips inactive feeds.
   - Local provider items flow through.
 - `reddit-feeds`: subreddit URL forms, the Redlib paths, `parseRssMedia`, `parseListingExtras`, `fetchSubredditItems`.
+- `youtube-api`: channel URL forms, the stored form, handle lookup (found, not found, no key, failure), `pagePlaylist` (all pages, the cap, private videos, a missing playlist), and that errors never hold the key.
+- `youtube-archive`: saving, picks (never-shown first, range, Shorts, excludes), archive info, and the fill (Shorts tagging and correction, runs once, failures, no key, the page cap).
+- `youtube-feeds`: RSS videos (IDs, Shorts by link, fallbacks), recent and archive posts (dates, Shorts, interleaving), and the settings conversions.
 - `image-cache`: shrinking to 1080px WebP, the disk cache, the path allowlist, 404/503.
 - `redlib`: the proxy (forwarding, header rewrite, cookies, media, 304, 502/503, compression, our paths never forwarded) and the HTML rewrite.
 - `rym-music-recs`: weighting, excluding existing guids, the summary and link format, and the env path overrides. Use a temp sqlite DB and a temp prefs file.
 - API suites. Call the handlers in-process, without a network server. The current code imports Next route handlers and passes them `Request` objects; use the closest equivalent in the framework you choose:
-  - feeds: CRUD, duplicate URL 409, unknown topics, the initial fetch on create, replacing topics.
+  - feeds: CRUD, duplicate URL 409, unknown topics, the initial fetch on create, replacing topics; YouTube channel feeds (canonical URL, settings and toggles, lookups, archive info in the DTO, PATCH refetch only on a real change).
   - feed-items: filters, saved and hidden exclusion, the three sort modes, cursor paging, limit validation.
   - refresh: all feeds versus one feed, and 404.
   - topics: seeding, create, duplicate, delete constraint 409, and the cascade delete of saved links.

@@ -7,6 +7,7 @@ primary_region = 'ams'
 # Reddit posts: Redlib runs in the same machine on loopback (scripts/fly-start.sh). The REDLIB_DEFAULT_* values
 # are Redlib's default settings for every visitor. For a throwaway account's session, use
 # `fly secrets set REDLIB_REDDIT_COOKIE=...` (never put it here).
+# YouTube: `fly secrets set YOUTUBE_API_KEY=...` (never put it here); used for @handle lookups and archive fills.
 [env]
   REDLIB_URL = 'http://127.0.0.1:8080'
   REDLIB_DEFAULT_THEME = 'black'

@@ -6,6 +6,39 @@ import {
   TopicSchema,
 } from '../src/lib/validations';
 
+describe('YouTube feed fields', () => {
+  const base = { name: 'GD', url: 'https://www.youtube.com/@GoogleDevelopers', topics: ['TECHNOLOGY'] };
+
+  it('rejects a YouTube URL that is not a channel, but keeps playlist RSS feeds', () => {
+    const watch = CreateFeedSchema.safeParse({ ...base, url: 'https://www.youtube.com/watch?v=WN-JK-hMAyg' });
+    expect(watch.success).toBe(false);
+    expect(!watch.success && watch.error.issues[0].message).toBe('YouTube feeds must be a channel URL, like https://www.youtube.com/@name');
+    expect(CreateFeedSchema.safeParse({ ...base, url: 'https://www.youtube.com/feeds/videos.xml?playlist_id=PL123' }).success).toBe(true);
+  });
+
+  it('takes real calendar days or null', () => {
+    expect(CreateFeedSchema.safeParse({ ...base, startDate: '2016-02-29', endDate: null }).success).toBe(true);
+    for (const startDate of ['2026-02-30', '2026-1-1', '20260101']) {
+      expect(CreateFeedSchema.safeParse({ ...base, startDate }).success, startDate).toBe(false);
+    }
+  });
+
+  it('rejects turning off both Recent and Archive', () => {
+    const r = CreateFeedSchema.safeParse({ ...base, recent: false, archive: false });
+    expect(r.success).toBe(false);
+    expect(!r.success && r.error.issues[0].message).toBe('Turn on Recent or Archive');
+    expect(CreateFeedSchema.safeParse({ ...base, recent: false }).success).toBe(true);
+    expect(UpdateFeedSchema.safeParse({ recent: false, archive: true }).success).toBe(true);
+  });
+
+  it('rejects an end date before the start date on create and update', () => {
+    const range = { startDate: '2020-01-02', endDate: '2020-01-01' };
+    expect(CreateFeedSchema.safeParse({ ...base, ...range }).success).toBe(false);
+    expect(UpdateFeedSchema.safeParse(range).success).toBe(false);
+    expect(UpdateFeedSchema.safeParse({ startDate: '2020-01-01', endDate: '2020-01-01' }).success).toBe(true);
+  });
+});
+
 describe('validations', () => {
   it('accepts valid CreateFeed payload', () => {
     const r = CreateFeedSchema.safeParse({

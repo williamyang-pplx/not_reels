@@ -18,6 +18,14 @@ export function formatRelativeTime(date: Date | string, now: Date = new Date()):
   return `${diffYr}y ago`;
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "4 Mar 2014": a video's upload day (UTC). A fixed month list, since en-GB gives "Sept" in Node's ICU. */
+export function formatUploadDate(date: Date | string): string {
+  const d = new Date(date);
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
 /**
  * Feed text keeps the source's hard line wraps, and a single newline is also how it marks paragraphs. Keep a
  * break only where the line ends a sentence (or the source left a blank line) and join the rest with a space.
@@ -75,4 +83,23 @@ export class HttpStatusError extends Error {
   constructor(readonly status: number) {
     super(`Status code ${status}`);
   }
+}
+
+/** YouTube descriptions are mostly links, timestamps, hashtags and credits; keep the prose. */
+export function cleanVideoDescription(text: string): string {
+  const lines = text.split('\n');
+  const credits = lines.findIndex((l) => /^\s*(special thanks|thanks to (all )?(my|our|these)|this video (was|is) (sponsored|made possible))/i.test(l));
+  return (credits >= 0 ? lines.slice(0, credits) : lines)
+    .filter((line) => {
+      const l = line.trim();
+      return !(
+        /https?:\/\//i.test(l) || // sponsor, social and merch links
+        /^\(?\d{1,2}:\d{2}(?::\d{2})?\)?(\s|$)/.test(l) || // chapter timestamps
+        /^[-—–_=*•~\s]{3,}$/.test(l) || // dividers
+        /^(#[\p{L}\p{N}_]+\s*)+$/u.test(l) || // hashtag lines
+        /^[\p{L}\s&/]{1,30}:$/u.test(l) // a label like "Social media:" whose links were dropped
+      );
+    })
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n');
 }

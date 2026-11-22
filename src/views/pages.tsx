@@ -1,7 +1,7 @@
 import { raw } from 'hono/html';
 import type { Child } from 'hono/jsx';
 import type { FeedDTO, FeedItemDTO, SavedLinkDTO } from '../lib/queries';
-import type { FilterType, SortOrder, TopicRecord } from '../lib/types';
+import type { FilterType, SortOrder, TopicRecord, YouTubeFeedInfo } from '../lib/types';
 import { assets } from '../assets';
 import {
   EmptyState,
@@ -242,6 +242,80 @@ export function SavedPage({ links, topics }: { links: SavedLinkDTO[]; topics: To
   );
 }
 
+/**
+ * Recent / Archive toggles, the archive's date range and the Shorts toggle for a YouTube feed. Hidden and disabled until the client turns them on, so a disabled
+ * fieldset adds nothing to the form data and its required URL input does not block submit. `withUrl` adds the
+ * channel URL input (Edit modal only).
+ */
+function YouTubeFields({ withUrl = false }: { withUrl?: boolean }) {
+  return (
+    <fieldset class="yt-fields flex flex-col gap-2" data-testid="youtube-fields" hidden disabled>
+      {withUrl && (
+        <input
+          type="text"
+          name="url"
+          required
+          autocapitalize="off"
+          autocorrect="off"
+          spellcheck={false}
+          placeholder="https://www.youtube.com/@channel"
+          class={inputClass}
+        />
+      )}
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="recent" checked data-testid="recent-checkbox" />
+        Recent videos (RSS)
+      </label>
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="archive" checked data-testid="archive-checkbox" />
+        From the archive
+      </label>
+      <div class="flex gap-2">
+        <label class="flex-1 flex flex-col gap-1 text-xs text-muted-foreground">
+          Archive from
+          <input type="date" name="startDate" class={inputClass} />
+        </label>
+        <label class="flex-1 flex flex-col gap-1 text-xs text-muted-foreground">
+          to
+          <input type="date" name="endDate" class={inputClass} />
+        </label>
+      </div>
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="includeShorts" data-testid="include-shorts-checkbox" />
+        Include Shorts
+      </label>
+    </fieldset>
+  );
+}
+
+/**
+ * A YouTube row's settings line: "Recent + archive (1,240 videos) · 2015-01-01 – 2017-12-31 · no Shorts",
+ * "Recent only · Shorts", "Archive only (not filled yet) · All dates · no Shorts".
+ */
+function youTubeSettingsLabel(s: YouTubeFeedInfo): string {
+  const sources = s.recent && s.archive ? 'Recent + archive' : s.recent ? 'Recent only' : 'Archive only';
+  const parts = [sources];
+  if (s.archive) {
+    const state = s.archiveFilled
+      ? `${s.archiveSize.toLocaleString('en-US')} videos`
+      : s.archiveError
+        ? 'fill failed'
+        : 'not filled yet';
+    parts[0] = `${sources} (${state})`;
+    parts.push(
+      s.startDate && s.endDate
+        ? `${s.startDate} – ${s.endDate}`
+        : s.startDate
+          ? `Since ${s.startDate}`
+          : s.endDate
+            ? `Until ${s.endDate}`
+            : 'All dates',
+    );
+  }
+  parts.push(s.includeShorts ? 'Shorts' : 'no Shorts');
+  return parts.join(' · ');
+}
+
 const moveBtnClass = 'w-6 h-6 rounded-full text-muted-foreground active:bg-accent disabled:opacity-30 text-base leading-none';
 
 export function ManagePage({ topics, feeds }: { topics: TopicRecord[]; feeds: FeedDTO[] }) {
@@ -335,6 +409,13 @@ export function ManagePage({ topics, feeds }: { topics: TopicRecord[]; feeds: Fe
             data-id={feed.id}
             data-name={feed.name}
             data-topics={feed.topics.join(',')}
+            data-kind={feed.sourceKind}
+            data-url={feed.url}
+            data-start={feed.youtube?.startDate ?? undefined}
+            data-end={feed.youtube?.endDate ?? undefined}
+            data-shorts={feed.youtube ? (feed.youtube.includeShorts ? '1' : '0') : undefined}
+            data-recent={feed.youtube ? (feed.youtube.recent ? '1' : '0') : undefined}
+            data-archive={feed.youtube ? (feed.youtube.archive ? '1' : '0') : undefined}
             class="rounded-lg border border-border bg-card p-3 flex flex-col gap-2"
           >
             <div class="flex items-center gap-2 flex-wrap">
@@ -345,6 +426,11 @@ export function ManagePage({ topics, feeds }: { topics: TopicRecord[]; feeds: Fe
             </div>
             <div class="text-sm font-bold">{feed.name}</div>
             <div class="text-xs text-muted-foreground break-all">{feed.url}</div>
+            {feed.youtube && (
+              <div class="text-xs text-muted-foreground" data-testid="youtube-settings">
+                {youTubeSettingsLabel(feed.youtube)}
+              </div>
+            )}
             <div class="flex gap-2 mt-1">
               <button type="button" data-act="refresh-feed" disabled={!feed.isActive} class="row-btn">
                 Refresh
@@ -377,14 +463,16 @@ export function ManagePage({ topics, feeds }: { topics: TopicRecord[]; feeds: Fe
           autocapitalize="off"
           autocorrect="off"
           spellcheck={false}
-          placeholder="https://example.com/rss.xml, https://www.reddit.com/r/sub or local/rym_music_recs"
+          placeholder="https://example.com/rss.xml, https://www.youtube.com/@channel, https://www.reddit.com/r/sub or local/rym_music_recs"
           class={inputClass}
         />
+        <YouTubeFields />
         <TopicCheckboxList topics={topics} />
       </Modal>
-      <Modal name="edit-feed" testId="edit-feed-modal" title="Edit topics">
+      <Modal name="edit-feed" testId="edit-feed-modal" title="Edit feed">
         <input type="hidden" name="id" />
         <p class="feed-name text-xs text-muted-foreground break-all"></p>
+        <YouTubeFields withUrl />
         <TopicCheckboxList topics={topics} />
       </Modal>
     </div>

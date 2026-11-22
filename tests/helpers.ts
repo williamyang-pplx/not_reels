@@ -4,7 +4,7 @@ import { ensureDefaultTopics } from '../src/lib/topics';
 
 export function resetDb() {
   const db = getDb();
-  db.exec('DELETE FROM "FeedItem"; DELETE FROM "FeedTopic"; DELETE FROM "Feed"; DELETE FROM "SavedLink"; DELETE FROM "HiddenLink"; DELETE FROM "Topic";');
+  db.exec('DELETE FROM "FeedItem"; DELETE FROM "FeedTopic"; DELETE FROM "Feed"; DELETE FROM "SavedLink"; DELETE FROM "HiddenLink"; DELETE FROM "Topic"; DELETE FROM "YouTubeVideo"; DELETE FROM "YouTubeChannel";');
   ensureDefaultTopics();
 }
 
@@ -27,6 +27,12 @@ export function createFeed(
     topic: string;
     topics: string[];
     isActive: boolean;
+    publishedAfter: number | null;
+    publishedBefore: number | null;
+    includeShorts: number | null;
+    showRecent: number | null;
+    showArchive: number | null;
+    lastFetched: number | null;
   }> = {},
 ): TestFeed {
   const db = getDb();
@@ -40,9 +46,24 @@ export function createFeed(
   };
   const now = ++createdAtTick;
   db.prepare(
-    `INSERT INTO "Feed" ("id", "name", "url", "sourceKind", "isActive", "fetchErrorCount", "createdAt", "updatedAt")
-     VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
-  ).run(feed.id, feed.name, feed.url, feed.sourceKind, feed.isActive ? 1 : 0, now, now);
+    `INSERT INTO "Feed" ("id", "name", "url", "sourceKind", "isActive", "fetchErrorCount", "createdAt", "updatedAt",
+       "publishedAfter", "publishedBefore", "includeShorts", "showRecent", "showArchive", "lastFetched")
+     VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    feed.id,
+    feed.name,
+    feed.url,
+    feed.sourceKind,
+    feed.isActive ? 1 : 0,
+    now,
+    now,
+    overrides.publishedAfter ?? null,
+    overrides.publishedBefore ?? null,
+    overrides.includeShorts ?? null,
+    overrides.showRecent ?? null,
+    overrides.showArchive ?? null,
+    overrides.lastFetched ?? null,
+  );
   const link = db.prepare('INSERT INTO "FeedTopic" ("feedId", "topicSlug") VALUES (?, ?)');
   for (const slug of topics) link.run(feed.id, slug);
   return { ...feed, topics: [...topics].sort().map((topicSlug) => ({ topicSlug })) };
@@ -106,7 +127,20 @@ export function countItems(feedId?: string): number {
 
 export function feedRow(id: string) {
   const row = getDb().prepare('SELECT * FROM "Feed" WHERE "id" = ?').get(id) as
-    | { id: string; name: string; isActive: number; fetchErrorCount: number; lastFetched: number | null }
+    | {
+        id: string;
+        name: string;
+        url: string;
+        sourceKind: string;
+        isActive: number;
+        fetchErrorCount: number;
+        lastFetched: number | null;
+        publishedAfter: number | null;
+        publishedBefore: number | null;
+        includeShorts: number | null;
+        showRecent: number | null;
+        showArchive: number | null;
+      }
     | undefined;
   return row ? { ...row, isActive: row.isActive === 1 } : null;
 }

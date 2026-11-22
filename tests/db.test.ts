@@ -149,6 +149,78 @@ describe('migrate', () => {
     expect(conn.prepare(`SELECT COUNT(*) AS n FROM pragma_table_info('FeedItem') WHERE "name" = 'media'`).get()).toEqual({ n: 1 });
   });
 
+  it('converts YouTube RSS feeds to YOUTUBE channel feeds, keeping their items', () => {
+    const conn = open();
+    migrate(conn);
+    const channel = 'UC_x5XG1OV2P6uZZ5FSM9Ttw';
+    const watch = 'https://www.youtube.com/watch?v=WN-JK-hMAyg';
+    conn.exec(`
+      INSERT INTO "Feed" ("id", "name", "url", "sourceKind", "fetchErrorCount", "updatedAt") VALUES
+        ('yt', 'GD', 'https://www.youtube.com/feeds/videos.xml?channel_id=${channel}', 'RSS', 2, 0),
+        ('pl', 'Playlist', 'https://www.youtube.com/feeds/videos.xml?playlist_id=PL123', 'RSS', 0, 0);
+      INSERT INTO "FeedItem" ("id", "feedId", "guid", "title", "link", "publishedAt") VALUES ('i1', 'yt', '${watch}', 'T', '${watch}', 0);
+    `);
+
+    migrate(conn);
+
+    const feeds = () =>
+      conn.prepare('SELECT "id", "url", "sourceKind", "fetchErrorCount", "includeShorts" FROM "Feed" ORDER BY "id"').all();
+    expect(feeds()).toEqual([
+      { id: 'pl', url: 'https://www.youtube.com/feeds/videos.xml?playlist_id=PL123', sourceKind: 'RSS', fetchErrorCount: 0, includeShorts: null },
+      { id: 'yt', url: `https://www.youtube.com/channel/${channel}`, sourceKind: 'YOUTUBE', fetchErrorCount: 0, includeShorts: null },
+    ]);
+    expect(conn.prepare('SELECT "id" FROM "FeedItem"').all()).toEqual([{ id: 'i1' }]);
+    const before = feeds();
+    migrate(conn);
+    expect(feeds()).toEqual(before);
+  });
+
+  it('folds a YouTube RSS feed into an existing feed for the same channel, merging topics', () => {
+    const conn = open();
+    migrate(conn);
+    const channel = 'UC_x5XG1OV2P6uZZ5FSM9Ttw';
+    conn.exec(`
+      INSERT INTO "Topic" ("slug", "label") VALUES ('MUSIC', 'Music'), ('NEWS', 'News');
+      INSERT INTO "Feed" ("id", "name", "url", "sourceKind", "createdAt", "updatedAt") VALUES
+        ('new', 'GD', 'https://www.youtube.com/channel/${channel}', 'YOUTUBE', 1, 0),
+        ('rss', 'GD RSS', 'https://www.youtube.com/feeds/videos.xml?channel_id=${channel}', 'RSS', 2, 0);
+      INSERT INTO "FeedTopic" ("feedId", "topicSlug") VALUES ('new', 'MUSIC'), ('rss', 'NEWS');
+    `);
+
+    migrate(conn);
+
+    expect(conn.prepare('SELECT "id" FROM "Feed"').all()).toEqual([{ id: 'new' }]);
+    expect(conn.prepare('SELECT "topicSlug" FROM "FeedTopic" WHERE "feedId" = ? ORDER BY 1').all('new')).toEqual([
+      { topicSlug: 'MUSIC' },
+      { topicSlug: 'NEWS' },
+    ]);
+  });
+
+  it('adds the YouTube columns to an older database', () => {
+    const conn = open();
+    conn.exec(LEGACY_SCHEMA);
+    migrate(conn);
+    migrate(conn);
+    for (const name of ['publishedAfter', 'publishedBefore', 'includeShorts', 'showRecent', 'showArchive']) {
+      expect(columns(conn).filter((c) => c === name), name).toHaveLength(1);
+    }
+    expect(conn.prepare(`SELECT 1 AS ok FROM pragma_table_info('FeedItem') WHERE "name" = 'uploadedAt'`).get()).toEqual({ ok: 1 });
+    const tables = conn.prepare(`SELECT "name" FROM sqlite_master WHERE "type" = 'table' AND "name" LIKE 'YouTube%' ORDER BY 1`).all();
+    expect(tables).toEqual([{ name: 'YouTubeChannel' }, { name: 'YouTubeVideo' }]);
+  });
+
+  it('adds the remaining YouTube columns to a DB with only the first three', () => {
+    const conn = open();
+    conn.exec(LEGACY_SCHEMA);
+    conn.exec(`DROP INDEX "Feed_type_idx"; ALTER TABLE "Feed" DROP COLUMN "type";
+      ALTER TABLE "Feed" ADD COLUMN "publishedAfter" DATETIME;
+      ALTER TABLE "Feed" ADD COLUMN "publishedBefore" DATETIME;
+      ALTER TABLE "Feed" ADD COLUMN "includeShorts" BOOLEAN;`);
+    migrate(conn);
+    expect(columns(conn)).toEqual(expect.arrayContaining(['showRecent', 'showArchive', 'includeShorts']));
+    expect(columns(conn).filter((c) => c === 'includeShorts')).toHaveLength(1);
+  });
+
   it('is idempotent on a fresh DB', () => {
     const conn = open();
     migrate(conn);

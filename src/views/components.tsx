@@ -6,7 +6,7 @@ import { redlibThreadPath } from '../lib/reddit-feeds';
 import { shrunkImageSrc } from '../image-cache';
 import { redlibUrl } from '../redlib';
 import type { TopicRecord } from '../lib/types';
-import { decodeEntities, formatRelativeTime, reflowText, topicColor } from '../lib/utils';
+import { decodeEntities, formatRelativeTime, formatUploadDate, reflowText, topicColor } from '../lib/utils';
 
 export function EmptyState({ message }: { message: string }) {
   return (
@@ -192,7 +192,10 @@ export function FeedCard({ item: raw, now }: { item: FeedItemDTO; now: Date }) {
   const meta = (sourceName: Child) => (
     <div class="meta">
       {sourceName}
-      <time datetime={item.publishedAt}>{formatRelativeTime(item.publishedAt, now)}</time>
+      <time datetime={item.publishedAt}>
+        {formatRelativeTime(item.publishedAt, now)}
+        {item.uploadedAt && ` · uploaded ${formatUploadDate(item.uploadedAt)}`}
+      </time>
     </div>
   );
 

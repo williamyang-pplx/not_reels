@@ -113,7 +113,7 @@ describe('GET /api/feed-items', () => {
     expect(item.feedUrl).toBe(feed.url);
     expect(item.feedTopics).toEqual(['TECHNOLOGY']);
     expect(Object.keys(item).sort()).toEqual(
-      ['author', 'feedId', 'feedName', 'feedTopics', 'feedUrl', 'guid', 'id', 'link', 'media', 'publishedAt', 'summary', 'title'].sort(),
+      ['author', 'feedId', 'feedName', 'feedTopics', 'feedUrl', 'guid', 'id', 'link', 'media', 'publishedAt', 'summary', 'title', 'uploadedAt'].sort(),
     );
   });
 

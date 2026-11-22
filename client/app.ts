@@ -450,6 +450,36 @@ function showError(el: Element | null, message: string | null) {
   el.hidden = !message;
 }
 
+/** A youtube.com URL (the server decides whether it is a channel). Shows the date and Shorts fields. */
+function isYouTubeUrl(value: string): boolean {
+  try {
+    return ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com'].includes(
+      new URL(value.trim()).hostname.toLowerCase(),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Show or hide a modal's YouTube fieldset; a hidden one is disabled, so its fields leave the form data. */
+function setYouTubeFields(modal: HTMLElement, on: boolean) {
+  const fs = $<HTMLFieldSetElement>('.yt-fields', modal)!;
+  fs.hidden = !on;
+  fs.disabled = !on;
+}
+
+/** The YouTube part of an add/edit body, or {} when the modal's fieldset is off. */
+function youTubeBody(modal: HTMLElement, fd: FormData): Record<string, unknown> {
+  if ($<HTMLFieldSetElement>('.yt-fields', modal)!.disabled) return {};
+  return {
+    startDate: String(fd.get('startDate') ?? '') || null,
+    endDate: String(fd.get('endDate') ?? '') || null,
+    includeShorts: fd.has('includeShorts'),
+    recent: fd.has('recent'),
+    archive: fd.has('archive'),
+  };
+}
+
 async function rowAction(act: string, btn: HTMLButtonElement) {
   const row = btn.closest<HTMLElement>('[data-testid="feed-row"]')!;
   const id = row.dataset.id!;
@@ -464,6 +494,16 @@ async function rowAction(act: string, btn: HTMLButtonElement) {
     $<HTMLInputElement>('input[name="id"]', modal)!.value = id;
     $('.feed-name', modal)!.textContent = row.dataset.name ?? '';
     for (const cb of $$<HTMLInputElement>('input[name="topics"]', modal)) cb.checked = topics.includes(cb.value);
+    const youTube = row.dataset.kind === 'YOUTUBE';
+    setYouTubeFields(modal, youTube);
+    if (youTube) {
+      $<HTMLInputElement>('input[name="url"]', modal)!.value = row.dataset.url ?? '';
+      $<HTMLInputElement>('input[name="startDate"]', modal)!.value = row.dataset.start ?? '';
+      $<HTMLInputElement>('input[name="endDate"]', modal)!.value = row.dataset.end ?? '';
+      $<HTMLInputElement>('input[name="includeShorts"]', modal)!.checked = row.dataset.shorts === '1';
+      $<HTMLInputElement>('input[name="recent"]', modal)!.checked = row.dataset.recent === '1';
+      $<HTMLInputElement>('input[name="archive"]', modal)!.checked = row.dataset.archive === '1';
+    }
     syncSubmit(modal);
     return;
   }
@@ -649,6 +689,10 @@ async function submitForm(form: HTMLFormElement) {
   const submit = $<HTMLButtonElement>('button[type="submit"]', form)!;
   const topics = fd.getAll('topics').map(String);
   if ((name === 'add-feed' || name === 'edit-feed') && topics.length === 0) return showError(err, 'Pick at least one topic');
+  const ytFields = $<HTMLFieldSetElement>('.yt-fields', modal);
+  if (ytFields && !ytFields.disabled && !fd.has('recent') && !fd.has('archive')) {
+    return showError(err, 'Turn on Recent or Archive');
+  }
   if (name === 'add-saved-link' && !str('topic')) return showError(err, 'Create a topic first');
 
   showError(err, null);
@@ -656,10 +700,11 @@ async function submitForm(form: HTMLFormElement) {
   submit.textContent = PENDING[name][0];
   try {
     if (name === 'add-feed') {
-      await api('POST', '/api/feeds', { name: str('name'), url: str('url'), topics });
+      await api('POST', '/api/feeds', { name: str('name'), url: str('url'), topics, ...youTubeBody(modal, fd) });
       invalidate('manage', 'feed');
     } else if (name === 'edit-feed') {
-      await api('PATCH', `/api/feeds/${str('id')}`, { topics });
+      const youTube = youTubeBody(modal, fd);
+      await api('PATCH', `/api/feeds/${str('id')}`, { topics, ...youTube, ...('includeShorts' in youTube ? { url: str('url') } : {}) });
       invalidate('manage', 'feed');
     } else {
       await api('POST', '/api/saved-links', {
@@ -671,6 +716,7 @@ async function submitForm(form: HTMLFormElement) {
       invalidate('saved');
     }
     form.reset();
+    if (name === 'add-feed') setYouTubeFields(modal, false);
     closeModal(modal);
     await reload();
   } catch (e) {
@@ -782,6 +828,13 @@ document.addEventListener('click', (e) => {
     default:
       return void rowAction(act, btn);
   }
+});
+
+document.addEventListener('input', (e) => {
+  const input = e.target;
+  if (!(input instanceof HTMLInputElement) || input.name !== 'url') return;
+  const modal = input.closest<HTMLElement>('[data-modal="add-feed"]');
+  if (modal) setYouTubeFields(modal, isYouTubeUrl(input.value));
 });
 
 document.addEventListener('change', (e) => {

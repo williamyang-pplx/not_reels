@@ -18,6 +18,10 @@ import { fetchSubredditItems, parseSubredditFeedUrl, type PageFetcher } from './
 import type { FeedSourceKind } from './types';
 import { HttpStatusError } from './utils';
 import { redlibUrl } from '../redlib';
+import { extractYouTubeId } from './embed';
+import { parseYouTubeFeedUrl, type JsonFetcher } from './youtube-api';
+import { markShown, startYouTubeFill } from './youtube-archive';
+import { fetchYouTubeFeedItems, youTubeOptionsFromRow } from './youtube-feeds';
 
 export interface RefreshResult {
   refreshed: number;
@@ -36,6 +40,8 @@ export interface RefreshOptions {
   pageFetcher?: PageFetcher;
   localProviders?: LocalFeedProviderRegistry;
   concurrency?: number;
+  /** Data API JSON fetch for YOUTUBE archive fills (tests stub it). */
+  youTubeFetcher?: JsonFetcher;
 }
 
 interface FeedRecord {
@@ -45,6 +51,12 @@ interface FeedRecord {
   sourceKind: string;
   isActive: number;
   fetchErrorCount: number;
+  lastFetched: number | null;
+  publishedAfter: number | null;
+  publishedBefore: number | null;
+  includeShorts: number | null;
+  showRecent: number | null;
+  showArchive: number | null;
 }
 
 /** Upsert on (feedId, guid), mark unseen items stale, return the number of new rows. */
@@ -52,12 +64,12 @@ function upsertItems(feedId: string, items: NormalizedItem[]): number {
   if (items.length === 0) return 0;
   const db = getDb();
   const upsert = db.prepare(`
-    INSERT INTO "FeedItem" ("id", "feedId", "guid", "title", "link", "summary", "author", "publishedAt", "sourceRank", "fetchedAt", "media")
-    VALUES (@id, @feedId, @guid, @title, @link, @summary, @author, @publishedAt, @sourceRank, @fetchedAt, @media)
+    INSERT INTO "FeedItem" ("id", "feedId", "guid", "title", "link", "summary", "author", "publishedAt", "sourceRank", "fetchedAt", "media", "uploadedAt")
+    VALUES (@id, @feedId, @guid, @title, @link, @summary, @author, @publishedAt, @sourceRank, @fetchedAt, @media, @uploadedAt)
     ON CONFLICT ("feedId", "guid") DO UPDATE SET
       "title" = excluded."title", "link" = excluded."link", "summary" = excluded."summary",
       "author" = excluded."author", "publishedAt" = excluded."publishedAt", "sourceRank" = excluded."sourceRank",
-      "media" = excluded."media"`);
+      "media" = excluded."media", "uploadedAt" = excluded."uploadedAt"`);
   const guids = Array.from(new Set(items.map((i) => i.guid)));
   const placeholders = guids.map(() => '?').join(',');
   const existing = new Set(
@@ -80,6 +92,7 @@ function upsertItems(feedId: string, items: NormalizedItem[]): number {
       publishedAt: it.publishedAt.getTime(),
       sourceRank: it.sourceRank,
       media: it.media ?? null,
+      uploadedAt: it.uploadedAt?.getTime() ?? null,
       fetchedAt: now,
     });
   }
@@ -104,7 +117,7 @@ function pruneLimitForFeed(feed: { url: string }): number {
 }
 
 function resolveFeedSourceKind(sourceKind: string): FeedSourceKind {
-  if (sourceKind === 'RSS' || sourceKind === 'LOCAL' || sourceKind === 'REDDIT') return sourceKind;
+  if (sourceKind === 'RSS' || sourceKind === 'LOCAL' || sourceKind === 'REDDIT' || sourceKind === 'YOUTUBE') return sourceKind;
   throw new Error(`Unsupported feed source kind: ${sourceKind}`);
 }
 
@@ -127,6 +140,20 @@ async function fetchNormalizedItems(feed: FeedRecord, options: RefreshOptions): 
   // rss-parser (and xml2js) load lazily so they stay off the cold-start path.
   const { defaultFetcher, normalizeAll } = await import('./rss-fetcher');
   const fetcher = options.fetcher ?? defaultFetcher;
+
+  if (sourceKind === 'YOUTUBE') {
+    const channelId = parseYouTubeFeedUrl(feed.url);
+    if (!channelId) throw new Error(`Invalid YouTube feed URL: ${feed.url}`);
+    const settings = youTubeOptionsFromRow(feed);
+    // The back catalog fill runs detached (a no-op once the channel is filled); its feed is refreshed when it ends.
+    if (settings.archive) {
+      void startYouTubeFill(channelId, {
+        fetchJson: options.youTubeFetcher,
+        onFilled: () => refreshSingleFeed(feed.id, options),
+      });
+    }
+    return fetchYouTubeFeedItems(channelId, settings, fetcher, now);
+  }
 
   if (sourceKind === 'REDDIT') {
     const base = redlibUrl();
@@ -151,10 +178,23 @@ function loadFeed(feedId: string): FeedRecord | undefined {
   return getDb().prepare('SELECT * FROM "Feed" WHERE "id" = ?').get(feedId) as FeedRecord | undefined;
 }
 
-/** Upsert, reset the error count and prune, in one transaction. Returns the number of new items. */
+/** A YOUTUBE feed's URL and settings, to tell whether an Edit changed them while a fetch ran. */
+function youTubeSettingsKey(row: FeedRecord): string {
+  return JSON.stringify([row.url, row.publishedAfter, row.publishedBefore, row.includeShorts, row.showRecent, row.showArchive]);
+}
+
+/**
+ * Upsert, reset the error count and prune, in one transaction. Returns the number of new items, or 0 without writing
+ * when a YOUTUBE feed's URL or settings changed while it was being fetched (the Edit's own refetch stores those).
+ * A YOUTUBE batch replaces the previous one (like RYM), and its videos are marked shown here, once stored.
+ */
 function storeItems(feed: FeedRecord, items: NormalizedItem[]): number {
   const db = getDb();
   return db.transaction(() => {
+    if (feed.sourceKind === 'YOUTUBE') {
+      const current = loadFeed(feed.id);
+      if (!current || youTubeSettingsKey(current) !== youTubeSettingsKey(feed)) return 0;
+    }
     const n = upsertItems(feed.id, items);
     const now = Date.now();
     db.prepare('UPDATE "Feed" SET "lastFetched" = ?, "fetchErrorCount" = 0, "updatedAt" = ? WHERE "id" = ?').run(
@@ -162,7 +202,15 @@ function storeItems(feed: FeedRecord, items: NormalizedItem[]): number {
       now,
       feed.id,
     );
-    pruneFeed(feed.id, pruneLimitForFeed(feed));
+    if (feed.sourceKind === 'YOUTUBE') {
+      pruneFeed(feed.id, items.length);
+      markShown(
+        items.map((i) => extractYouTubeId(i.link)).filter((id): id is string => id !== null),
+        now,
+      );
+    } else {
+      pruneFeed(feed.id, pruneLimitForFeed(feed));
+    }
     return n;
   })();
 }
@@ -192,9 +240,9 @@ export async function refreshSingleFeed(feedId: string, options: RefreshOptions 
 }
 
 /**
- * Refresh every active feed. RSS and LOCAL feeds share one p-limit pool; REDDIT feeds run one at a time in their
- * own pool (each is 2 Redlib requests, so Redlib asks Reddit for one subreddit at a time). A per-feed refresh from
- * Manage is not pooled.
+ * Refresh every active feed. RSS, LOCAL and YOUTUBE feeds share one p-limit pool (a YOUTUBE refresh may start a
+ * detached archive fill); REDDIT feeds run one at a time in their own pool (each is 2 Redlib requests, so Redlib asks
+ * Reddit for one subreddit at a time). A per-feed refresh from Manage is not pooled.
  */
 export async function refreshAllFeeds(options: RefreshOptions = {}): Promise<RefreshResult> {
   const limit = pLimit(options.concurrency ?? FETCH_CONCURRENCY);

@@ -2,7 +2,7 @@ import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { ZodError, type ZodSchema } from 'zod';
 
-export type ErrorCode = 'INVALID_JSON' | 'VALIDATION_ERROR' | 'DUPLICATE' | 'NOT_FOUND' | 'CONSTRAINT';
+export type ErrorCode = 'INVALID_JSON' | 'VALIDATION_ERROR' | 'DUPLICATE' | 'NOT_FOUND' | 'CONSTRAINT' | 'YOUTUBE_UNAVAILABLE';
 
 type Parsed<T> = { ok: true; data: T } | { ok: false; response: Response };
 

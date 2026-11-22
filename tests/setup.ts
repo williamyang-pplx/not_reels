@@ -1,7 +1,7 @@
 import { existsSync, unlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterAll, beforeAll } from 'vitest';
+import { afterAll, afterEach, beforeAll } from 'vitest';
 
 const TEST_DB_PATH = path.join(os.tmpdir(), `not-brainrot-test-${process.pid}.db`);
 process.env.DATABASE_URL = `file:${TEST_DB_PATH}`;
@@ -20,6 +20,12 @@ beforeAll(async () => {
   getDb();
   const { ensureDefaultTopics } = await import('../src/lib/topics');
   ensureDefaultTopics();
+});
+
+// A YouTube archive fill runs detached; wait for it so none outlives its test (or writes into the next one's DB).
+afterEach(async () => {
+  const { settleYouTubeFills } = await import('../src/lib/youtube-archive');
+  await settleYouTubeFills();
 });
 
 afterAll(async () => {

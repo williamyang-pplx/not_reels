@@ -7,10 +7,10 @@ The design is in `documentation/low_level_plan.md` and `documentation/framework_
 - `pnpm build`: Tailwind (inlined into pages), the client bundle `dist/public/app.<hash>.js`, `sw.js`, and `dist/server.mjs`
 - `pnpm start`: `node dist/server.mjs` (PORT, default 3000; DATABASE_URL, default `file:./data/dev.db`). Migrates at boot.
 - `pnpm test`: Vitest (forks, single fork). `pnpm lint` is `tsc --noEmit`.
-- `./scripts/restart.sh`: rebuild, start (or reuse) the `nr-redlib` Docker container on :8180 (with `REDLIB_ENABLE_RSS=on`), then serve on :3100 against `/tmp/nr-dev.db` with `REDLIB_URL` set. `docker rm -f nr-redlib` applies changed Redlib settings.
+- `./scripts/restart.sh`: rebuild, start (or reuse) the `nr-redlib` Docker container on :8180 (with `REDLIB_ENABLE_RSS=on`), then serve on :3100 against `/tmp/nr-dev.db` with `REDLIB_URL` set. `docker rm -f nr-redlib` applies changed Redlib settings. The server inherits `YOUTUBE_API_KEY` from the shell.
 - `node scripts/e2e.mjs [db]`: browser pass over every UI flow on a copy of a DB. `node scripts/ui-check.mjs`: screenshots and timings.
 - `scripts/bench/`: the framework benchmark harness (see its README).
-- Deploy (Fly): the image bundles the Redlib binary and sharp (its Linux binary only); `scripts/fly-start.sh` runs Redlib on 127.0.0.1:8080 and then the server. `fly.toml` `[env]` has `REDLIB_URL`, `REDLIB_ENABLE_RSS=on` and Redlib's defaults.
+- Deploy (Fly): the image bundles the Redlib binary and sharp (its Linux binary only); `scripts/fly-start.sh` runs Redlib on 127.0.0.1:8080 and then the server. `fly.toml` `[env]` has `REDLIB_URL`, `REDLIB_ENABLE_RSS=on` and Redlib's defaults. `YOUTUBE_API_KEY` is a Fly secret, never in `fly.toml`.
 - With a broken `NODE_OPTIONS` preload in the shell, prefix commands with `unset NODE_OPTIONS;`.
 
 ## Architecture
@@ -28,12 +28,18 @@ The design is in `documentation/low_level_plan.md` and `documentation/framework_
   Pages carry `data-rendered`. The client revalidates a page that is older than 5 s.
   Pages carry `data-build` (CSS + JS hash) and page/partial responses send `X-Build`. On a mismatch the client drops
   the cached pages and reloads once, so a page cached before a deploy never runs new markup with old JS.
-- **Refresh** is manual only (`POST /api/feed-items/refresh`); REDDIT feeds go one at a time. rss-parser is imported lazily to keep it off the cold path.
+- **Refresh** is manual only (`POST /api/feed-items/refresh`); REDDIT feeds go one at a time, and a YOUTUBE refresh may start a detached archive fill. rss-parser is imported lazily to keep it off the cold path.
 - **Reddit (Redlib):** subreddit feeds (sourceKind REDDIT) are refreshed from a self-hosted Redlib (`src/redlib.ts` proxies it
   same-origin): its RSS output for text and every image/video, its HTML listing for link, score and comments
   (`src/lib/reddit-feeds.ts`), stored as normal cards with `FeedItem.media` (JSON). Card images go through `/_img/…`
   (`src/image-cache.ts`: shrunk to 1080px WebP, cached on disk). A post or its subreddit opens on tap in one sheet outside
   `#app` (a fresh frame per open). `REDLIB_URL` unset: REDDIT refreshes fail and the sheet is off. See spec §7.1.
+- **YouTube:** one feed per channel (sourceKind YOUTUBE, stored as `https://www.youtube.com/channel/UC…`) with two
+  sources: its RSS feed (Recent, 15 newest; Shorts are `/shorts/` links) and an archive, the `YouTubeVideo` table
+  (`src/lib/youtube-archive.ts`), which every RSS video joins and which a one-time background fill per channel pages
+  through the Data API (`src/lib/youtube-api.ts`). Each refresh picks 30 never-shown-first archive videos and replaces
+  the last batch; refresh never calls the API. `YOUTUBE_API_KEY` (a Fly secret) is used for handle lookups and fills
+  only. Never put a request URL in an error or log: it carries the key. See spec §7.2.
 
 ## Conventions
 - API errors use `fail(c, message, code, status)` and the `{ error: { message, code } }` envelope. Validate with the Zod schemas in `src/lib/validations.ts`.

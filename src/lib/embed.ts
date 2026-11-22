@@ -1,6 +1,7 @@
 export type EmbedKind = 'youtube' | 'reddit' | null;
 
-const YOUTUBE_HOSTS = new Set([
+/** Hosts of YouTube pages; youtube-feeds.ts reads channel URLs on them too. */
+export const YOUTUBE_HOSTS = new Set([
   'youtube.com',
   'www.youtube.com',
   'm.youtube.com',

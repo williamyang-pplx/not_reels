@@ -276,6 +276,73 @@ describe('GET /saved and /manage', () => {
     expect(pills.slice(0, 3)).toEqual(['ALL', 'OTHER', 'NEWS']);
   });
 
+  it('shows a YouTube feed\'s settings on its row and in data attributes for Edit', async () => {
+    createFeed({
+      name: 'GD',
+      url: 'https://www.youtube.com/channel/UC_x5XG1OV2P6uZZ5FSM9Ttw',
+      sourceKind: 'YOUTUBE',
+      publishedAfter: Date.parse('2015-01-01T00:00:00Z'),
+      publishedBefore: Date.parse('2018-01-01T00:00:00Z'),
+      includeShorts: 1,
+    });
+    createFeed({ name: 'Blog', url: 'https://b.example/feed.xml' });
+    const { body } = await html('/manage');
+    const row = body.match(/<div[^>]*data-testid="feed-row"[^>]*data-name="GD"[^>]*>/)![0];
+    expect(row).toContain('data-kind="YOUTUBE"');
+    expect(row).toContain('data-start="2015-01-01"');
+    expect(row).toContain('data-end="2017-12-31"');
+    expect(row).toContain('data-shorts="1"');
+    expect(body).toContain('2015-01-01 – 2017-12-31 · Shorts');
+    const blog = body.match(/<div[^>]*data-testid="feed-row"[^>]*data-name="Blog"[^>]*>/)![0];
+    expect(blog).toContain('data-url="https://b.example/feed.xml"');
+    expect(blog).not.toContain('data-shorts');
+  });
+
+  it('labels a YouTube row by its sources and archive state', async () => {
+    const { getDb } = await import('../src/db');
+    const { seedVideos } = await import('./fixtures/youtube');
+    createFeed({ name: 'Both', url: 'https://www.youtube.com/channel/UC_x5XG1OV2P6uZZ5FSM9Ttw', sourceKind: 'YOUTUBE' });
+    createFeed({ name: 'Recent', url: 'https://www.youtube.com/channel/UCaaaaaaaaaaaaaaaaaaaaaa', sourceKind: 'YOUTUBE', showArchive: 0 });
+    createFeed({ name: 'Failed', url: 'https://www.youtube.com/channel/UCbbbbbbbbbbbbbbbbbbbbbb', sourceKind: 'YOUTUBE', showRecent: 0 });
+    await seedVideos('UC_x5XG1OV2P6uZZ5FSM9Ttw', 1240);
+    getDb().exec(`INSERT INTO "YouTubeChannel" ("channelId", "filledAt") VALUES ('UC_x5XG1OV2P6uZZ5FSM9Ttw', 1);
+      INSERT INTO "YouTubeChannel" ("channelId", "fillError") VALUES ('UCbbbbbbbbbbbbbbbbbbbbbb', 'YOUTUBE_API_KEY is not set');`);
+    const { body } = await html('/manage');
+    expect(body).toContain('Recent + archive (1,240 videos) · All dates · no Shorts');
+    expect(body).toContain('Recent only · no Shorts');
+    expect(body).toContain('Archive only (fill failed) · All dates · no Shorts');
+    const row = body.match(/<div[^>]*data-testid="feed-row"[^>]*data-name="Recent"[^>]*>/)![0];
+    expect(row).toContain('data-recent="1"');
+    expect(row).toContain('data-archive="0"');
+  });
+
+  it('shows a YouTube video\'s upload date beside the card time', async () => {
+    const { getDb } = await import('../src/db');
+    const feed = createFeed({ url: 'https://www.youtube.com/channel/UC_x5XG1OV2P6uZZ5FSM9Ttw', sourceKind: 'YOUTUBE' });
+    seedItems(feed.id, 3);
+    const set = getDb().prepare('UPDATE "FeedItem" SET "uploadedAt" = ? WHERE "guid" = ?');
+    set.run(Date.parse('2014-03-04T15:00:00Z'), `item-${feed.id}-0`);
+    set.run(Date.parse('2014-09-04T15:00:00Z'), `item-${feed.id}-1`);
+    const { body } = await html('/?sort=new');
+    expect(body).toContain(' · uploaded 4 Mar 2014');
+    expect(body).toContain(' · uploaded 4 Sep 2014');
+    expect(body.match(/· uploaded/g)).toHaveLength(2);
+  });
+
+  it('has a hidden, disabled YouTube fieldset in both feed modals', async () => {
+    const { body } = await html('/manage');
+    const fieldsets = [...body.matchAll(/<fieldset[^>]*data-testid="youtube-fields"[^>]*>/g)].map((m) => m[0]);
+    expect(fieldsets).toHaveLength(2);
+    for (const fs of fieldsets) {
+      expect(fs).toContain('hidden');
+      expect(fs).toContain('disabled');
+    }
+    expect(body).toContain('aria-label="Edit feed"');
+    expect(body.match(/data-testid="recent-checkbox"/g)).toHaveLength(2);
+    expect(body.match(/data-testid="archive-checkbox"/g)).toHaveLength(2);
+    expect(body).not.toContain('Edit topics');
+  });
+
   it('shows the manage empty state', async () => {
     const { body } = await html('/manage');
     expect(body).toContain('No feeds yet. Add your first one above.');

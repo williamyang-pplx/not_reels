@@ -4,6 +4,8 @@ import type { ParsedFeed } from '../src/lib/rss-fetcher';
 import { resetDb, createFeed, itemsOf, itemByGuid, countItems, feedRow } from './helpers';
 import { MAX_ITEMS_PER_FEED } from '../src/lib/constants';
 import { LISTING_HTML, RSS_ITEMS } from './fixtures/redlib';
+import { CHANNEL_ID, CHANNEL_URL, playlistPage, rssItem, seedVideos, video } from './fixtures/youtube';
+import { getDb } from '../src/db';
 
 function fakeFetcher(items: Array<{ guid?: string; title?: string; link?: string; isoDate?: string }>): () => Promise<ParsedFeed> {
   return async () => ({ title: 'fake', items });
@@ -259,6 +261,96 @@ describe('refreshSingleFeed', () => {
 
     expect(itemB?.sourceRank).toBe(0);
     expect(itemA?.sourceRank).toBe(10_000);
+  });
+});
+
+describe('refreshSingleFeed (YOUTUBE)', () => {
+  const recent = Array.from({ length: 15 }, (_, i) =>
+    rssItem(`r${String(i).padStart(10, '0')}`, new Date(Date.parse('2026-11-21T00:00:00Z') - i * 86_400_000).toISOString()),
+  );
+  const rss = async (): Promise<ParsedFeed> => ({ items: recent });
+  // A filled channel: no fill starts, so these cases need no API stub.
+  const filled = () =>
+    getDb().prepare('INSERT INTO "YouTubeChannel" ("channelId", "filledAt") VALUES (?, 1)').run(CHANNEL_ID);
+  const youTubeFeed = (overrides: Parameters<typeof createFeed>[0] = {}) =>
+    createFeed({ url: CHANNEL_URL, sourceKind: 'YOUTUBE', ...overrides });
+  const shownAt = (link: string) =>
+    (getDb().prepare('SELECT "lastShownAt" FROM "YouTubeVideo" WHERE "videoId" = ?').get(link.slice(-11)) as
+      | { lastShownAt: number | null }
+      | undefined)?.lastShownAt ?? null;
+
+  beforeEach(() => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  it('refreshes a YOUTUBE feed from its RSS feed and archive', async () => {
+    filled();
+    await seedVideos(CHANNEL_ID, 40);
+    const feed = youTubeFeed();
+    expect(await refreshSingleFeed(feed.id, { fetcher: rss })).toEqual({ newItems: 45, ok: true });
+    const stored = itemsOf(feed.id);
+    expect(stored).toHaveLength(45);
+    expect(stored.slice(0, 2).map((i) => i.link.slice(-11, -10))).toEqual(['r', 'a']);
+  });
+
+  it('replaces a YOUTUBE feed’s archive batch on the next refresh with never-shown videos', async () => {
+    filled();
+    await seedVideos(CHANNEL_ID, 60);
+    const feed = youTubeFeed({ showRecent: 0 });
+    await refreshSingleFeed(feed.id, { fetcher: rss });
+    const first = new Set(itemsOf(feed.id).map((i) => i.guid));
+    await refreshSingleFeed(feed.id, { fetcher: rss });
+    const second = itemsOf(feed.id).map((i) => i.guid);
+    expect(second).toHaveLength(30);
+    expect(second.some((g) => first.has(g))).toBe(false);
+  });
+
+  it('marks a YOUTUBE batch shown once it is stored', async () => {
+    filled();
+    await seedVideos(CHANNEL_ID, 5);
+    const feed = youTubeFeed();
+    await refreshSingleFeed(feed.id, { fetcher: rss });
+    expect(itemsOf(feed.id).every((i) => shownAt(i.link) !== null)).toBe(true);
+  });
+
+  it('stores uploadedAt on a YOUTUBE post', async () => {
+    filled();
+    await seedVideos(CHANNEL_ID, 1, { newest: '2014-03-04T15:00:00Z' });
+    const feed = youTubeFeed({ showRecent: 0 });
+    await refreshSingleFeed(feed.id, { fetcher: rss });
+    const [item] = itemsOf(feed.id) as (ReturnType<typeof itemsOf>[number] & { uploadedAt: number })[];
+    expect(item.uploadedAt).toBe(Date.parse('2014-03-04T15:00:00Z'));
+    expect(Number(item.publishedAt)).toBeGreaterThan(Date.parse('2026-01-01T00:00:00Z'));
+  });
+
+  it('starts the archive fill on a YOUTUBE refresh, and refreshes the feed when it finishes', async () => {
+    vi.stubEnv('YOUTUBE_API_KEY', 'test-key');
+    const feed = youTubeFeed({ showRecent: 0 });
+    const uploads = playlistPage([video('f0000000000', '2012-05-01T00:00:00Z'), video('f0000000001', '2012-04-01T00:00:00Z')]);
+    const youTubeFetcher = vi.fn(async (url: string) => {
+      if (new URL(url).searchParams.get('playlistId')!.startsWith('UUSH')) throw new Error('YouTube API 404 playlistNotFound');
+      return uploads;
+    });
+    expect(await refreshSingleFeed(feed.id, { fetcher: rss, youTubeFetcher })).toEqual({ newItems: 0, ok: true });
+    const { settleYouTubeFills } = await import('../src/lib/youtube-archive');
+    await settleYouTubeFills();
+    expect(itemsOf(feed.id).map((i) => i.link.slice(-11))).toEqual(expect.arrayContaining(['f0000000000', 'f0000000001']));
+    expect(youTubeFetcher).toHaveBeenCalledTimes(2);
+    vi.unstubAllEnvs();
+  });
+
+  it('drops a YOUTUBE fetch whose settings changed while it ran, without marking anything shown', async () => {
+    filled();
+    const feed = youTubeFeed({ showArchive: 0 });
+    const fetcher = async (): Promise<ParsedFeed> => {
+      // An Edit lands mid-fetch: the range changes.
+      getDb().prepare('UPDATE "Feed" SET "publishedAfter" = ? WHERE "id" = ?').run(Date.parse('2026-11-15T00:00:00Z'), feed.id);
+      return { items: recent };
+    };
+    expect(await refreshSingleFeed(feed.id, { fetcher })).toEqual({ newItems: 0, ok: true });
+    expect(countItems(feed.id)).toBe(0);
+    expect(shownAt(recent[0].link)).toBeNull();
+    expect(feedRow(feed.id)?.lastFetched).toBeNull();
   });
 });
 

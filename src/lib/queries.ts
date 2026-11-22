@@ -1,6 +1,9 @@
 import { getDb, bool, toDate } from '../db';
 import { RANKED_LIST_SIZE } from './constants';
 import { recommendItems } from './recommendation';
+import { parseYouTubeFeedUrl } from './youtube-api';
+import { archiveInfo, type ArchiveInfo } from './youtube-archive';
+import { youTubeOptionsFromRow, youTubeSettingsFromOptions } from './youtube-feeds';
 import type { Feed, FeedItem, RedditMedia, SavedLink, SortOrder } from './types';
 
 // ---------- feeds ----------
@@ -15,6 +18,11 @@ interface FeedRow {
   lastFetched: number | null;
   createdAt: number;
   updatedAt: number;
+  publishedAfter: number | null;
+  publishedBefore: number | null;
+  includeShorts: number | null;
+  showRecent: number | null;
+  showArchive: number | null;
 }
 
 export type FeedDTO = Feed & { updatedAt: string };
@@ -38,7 +46,16 @@ function topicsByFeed(feedIds: string[]): Map<string, string[]> {
   return out;
 }
 
-function mapFeed(row: FeedRow, topics: string[]): FeedDTO {
+/** The archive info of every YOUTUBE row's channel, in one query. */
+function archiveFor(rows: FeedRow[]): Map<string, ArchiveInfo> {
+  return archiveInfo(
+    rows.flatMap((r) => (r.sourceKind === 'YOUTUBE' ? [parseYouTubeFeedUrl(r.url) ?? ''] : [])).filter(Boolean),
+  );
+}
+
+const NO_ARCHIVE: ArchiveInfo = { archiveSize: 0, archiveFilled: false, archiveError: null };
+
+function mapFeed(row: FeedRow, topics: string[], archive: Map<string, ArchiveInfo>): FeedDTO {
   return {
     id: row.id,
     name: row.name,
@@ -50,6 +67,13 @@ function mapFeed(row: FeedRow, topics: string[]): FeedDTO {
     createdAt: toDate(row.createdAt).toISOString(),
     updatedAt: toDate(row.updatedAt).toISOString(),
     topics,
+    youtube:
+      row.sourceKind === 'YOUTUBE'
+        ? {
+            ...youTubeSettingsFromOptions(youTubeOptionsFromRow(row)),
+            ...(archive.get(parseYouTubeFeedUrl(row.url) ?? '') ?? NO_ARCHIVE),
+          }
+        : null,
   };
 }
 
@@ -67,13 +91,14 @@ export function listFeeds(filter: { topic?: string } = {}): FeedDTO[] {
     )
     .all(...args) as FeedRow[];
   const topics = topicsByFeed(rows.map((r) => r.id));
-  return rows.map((r) => mapFeed(r, topics.get(r.id) ?? []));
+  const archive = archiveFor(rows);
+  return rows.map((r) => mapFeed(r, topics.get(r.id) ?? [], archive));
 }
 
 export function getFeed(id: string): FeedDTO | null {
   const row = getDb().prepare('SELECT * FROM "Feed" WHERE "id" = ?').get(id) as FeedRow | undefined;
   if (!row) return null;
-  return mapFeed(row, topicsByFeed([id]).get(id) ?? []);
+  return mapFeed(row, topicsByFeed([id]).get(id) ?? [], archiveFor([row]));
 }
 
 // ---------- feed items ----------
@@ -100,10 +125,11 @@ interface ItemRow {
   feedName: string;
   feedUrl: string;
   media: string | null;
+  uploadedAt: number | null;
 }
 
 const ITEM_COLUMNS = `i."id", i."feedId", i."guid", i."title", i."link", i."summary", i."author",
-  i."publishedAt", i."sourceRank", f."name" AS feedName, f."url" AS feedUrl, i."media"`;
+  i."publishedAt", i."sourceRank", f."name" AS feedName, f."url" AS feedUrl, i."media", i."uploadedAt"`;
 
 /** A Reddit post's stored media, or null (other feeds, or JSON that no longer parses). */
 function parseMedia(json: string | null): RedditMedia | null {
@@ -129,6 +155,7 @@ function mapItem(row: ItemRow, topics: string[]): FeedItemDTO {
     feedUrl: row.feedUrl,
     feedTopics: topics,
     media: parseMedia(row.media),
+    uploadedAt: row.uploadedAt === null ? null : toDate(row.uploadedAt).toISOString(),
   };
 }
 

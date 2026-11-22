@@ -24,6 +24,8 @@ INSERT INTO Feed (id,name,url,sourceKind,isActive,fetchErrorCount,createdAt,upda
 INSERT INTO FeedTopic VALUES ('e2e-feed','TECHNOLOGY');
 INSERT INTO Feed (id,name,url,sourceKind,isActive,fetchErrorCount,createdAt,updatedAt) VALUES ('e2e-reddit','r/listentothis','https://www.reddit.com/r/listentothis/','REDDIT',1,0,${now},${now});
 INSERT INTO FeedTopic VALUES ('e2e-reddit','NEWS');
+INSERT INTO Feed (id,name,url,sourceKind,isActive,fetchErrorCount,createdAt,updatedAt,publishedAfter,publishedBefore,includeShorts,showRecent,showArchive) VALUES ('e2e-youtube','E2E channel','https://www.youtube.com/channel/UCe2eeeeeeeeeeeeeeeeeeee','YOUTUBE',0,0,${now},${now},${Date.UTC(2015, 0, 1)},${Date.UTC(2018, 0, 1)},1,0,1);
+INSERT INTO FeedTopic VALUES ('e2e-youtube','NEWS');
 INSERT INTO FeedItem (id,feedId,guid,title,link,publishedAt,sourceRank,fetchedAt) VALUES ${rows.join(',')};`]);
 // An item a minute in the future, so it is first under New whatever the DB holds, with a summary past the card's excerpt.
 const LONG = Array.from({ length: 1500 }, (_, i) => `word${i}`).join(' '); // far more than 3 cards' worth
@@ -207,6 +209,41 @@ try {
   await page.click('[data-testid=edit-feed-modal] button[type=submit]');
   await page.waitForFunction((r) => document.querySelector(r)?.dataset.topics === 'NEWS,TECHNOLOGY', row);
   ok('edit topics');
+
+  // YouTube fields: shown in Add only for a youtube.com URL, and in Edit only for a YOUTUBE feed (pre-filled).
+  // The seeded YouTube feed is paused, so no refresh here calls the Data API.
+  const addFields = '[data-testid=add-feed-modal] [data-testid=youtube-fields]';
+  await page.click('[data-testid=add-feed-btn]');
+  assert.equal(await page.isVisible(addFields), false);
+  await page.fill('[data-testid=add-feed-modal] input[name=url]', 'https://www.youtube.com/@GoogleDevelopers');
+  assert.equal(await page.isVisible(addFields), true);
+  await page.uncheck('[data-testid=add-feed-modal] [data-testid=recent-checkbox]');
+  await page.uncheck('[data-testid=add-feed-modal] [data-testid=archive-checkbox]');
+  await page.fill('[data-testid=add-feed-modal] input[name=name]', 'Both off');
+  await page.check('[data-testid=add-feed-modal] [data-testid=topic-checkbox-NEWS]');
+  await page.click('[data-testid=add-feed-modal] button[type=submit]');
+  await page.waitForFunction(() => document.querySelector('[data-testid=add-feed-modal] .form-error')?.textContent === 'Turn on Recent or Archive');
+  await page.check('[data-testid=add-feed-modal] [data-testid=recent-checkbox]');
+  await page.check('[data-testid=add-feed-modal] [data-testid=archive-checkbox]');
+  await page.fill('[data-testid=add-feed-modal] input[name=url]', 'https://hnrss.org/best');
+  assert.equal(await page.isVisible(addFields), false);
+  await page.click('[data-testid=add-feed-modal] [data-close]');
+  ok('add modal shows the YouTube fields only for a YouTube URL, and needs Recent or Archive');
+
+  const editFields = '[data-testid=edit-feed-modal] [data-testid=youtube-fields]';
+  await page.click('[data-testid=feed-row][data-name="E2E channel"] [data-testid=feed-edit-btn]');
+  assert.equal(await page.isVisible(editFields), true);
+  assert.equal(await page.inputValue('[data-testid=edit-feed-modal] input[name=url]'), 'https://www.youtube.com/channel/UCe2eeeeeeeeeeeeeeeeeeee');
+  assert.equal(await page.inputValue('[data-testid=edit-feed-modal] input[name=startDate]'), '2015-01-01');
+  assert.equal(await page.inputValue('[data-testid=edit-feed-modal] input[name=endDate]'), '2017-12-31');
+  assert.equal(await page.isChecked('[data-testid=edit-feed-modal] [data-testid=include-shorts-checkbox]'), true);
+  assert.equal(await page.isChecked('[data-testid=edit-feed-modal] [data-testid=recent-checkbox]'), false);
+  assert.equal(await page.isChecked('[data-testid=edit-feed-modal] [data-testid=archive-checkbox]'), true);
+  await page.click('[data-testid=edit-feed-modal] [data-close]');
+  await page.click(`${row} [data-testid=feed-edit-btn]`);
+  assert.equal(await page.isVisible(editFields), false);
+  await page.click('[data-testid=edit-feed-modal] [data-close]');
+  ok('edit modal pre-fills the YouTube fields for a YouTube feed only');
 
   await page.click(`${row} [data-testid=feed-pause-btn]`);
   await page.waitForFunction((r) => document.querySelector(r + ' [data-testid=feed-pause-btn]')?.textContent?.trim() === 'Resume', row);
