@@ -24,6 +24,7 @@ interface YTPlayerOptions {
   events: {
     onReady(): void;
     onError(): void;
+    onStateChange(e: { data: number }): void;
     onAutoplayBlocked(): void;
   };
 }
@@ -35,7 +36,10 @@ declare global {
 }
 
 const AUTOPLAY_KEY = 'nr-autoplay'; // localStorage: 'off' when switched off; absent means on
-const AUTOPLAY_SETTLE_MS = 300; // scrolling must rest this long before a video starts
+const AUTOPLAY_SETTLE_MS = 100; // scrolling must rest this long before a video starts (or fire scrollend)
+// A glide after the finger lifts that has slowed below GLIDE_PX_PER_MS for GLIDE_MS picks before it fully stops.
+const GLIDE_PX_PER_MS = 0.25;
+const GLIDE_MS = 120;
 const PLAYER_TIMEOUT_MS = 5_000; // the API and its player must be ready by then, or this page uses per-card players
 
 let autoplayOn = localStorage.getItem(AUTOPLAY_KEY) !== 'off';
@@ -56,14 +60,20 @@ let layer: HTMLElement | null = null;
 const resumeAt = new Map<string, number>(); // video ID → whole seconds
 const failed = new Set<string>(); // video IDs that errored in the layer player; they use per-card players
 /**
- * Boxes in frame, kept by an observer: measuring every box on each settle would force the layout that
- * `content-visibility: auto` skips on off-screen cards.
+ * Boxes within a screen's height of the view, kept by an observer; a pick measures only these (measuring every box
+ * would force the layout that `content-visibility: auto` skips on off-screen cards). The pick measures them itself,
+ * so it never sees a stale set: scrollend and the glide's scroll events can come before the observer's update.
  */
-const inFrame = new Set<HTMLElement>();
+const nearFrame = new Set<HTMLElement>();
 let videoObserver: IntersectionObserver | null = null;
 let settleTimer = 0;
 let autoplayHolds = 0;
 let blocked: () => boolean = () => false;
+let touching = false; // a finger is on the screen: a slow drag is reading, not a glide
+let lastScroll = { y: 0, at: 0 };
+let slowSince = 0; // when the glide went below GLIDE_PX_PER_MS (0: it hasn't)
+/** Timing for the console log: the video asked for, when, and how long after the last scroll movement. */
+let timing: { id: string; at: number; wait: number } | null = null;
 
 const navBar = () => document.querySelector<HTMLElement>('[data-testid="nav-bar"]');
 
@@ -77,37 +87,63 @@ const navBar = () => document.querySelector<HTMLElement>('[data-testid="nav-bar"
  */
 export function initYouTube(isBlocked: () => boolean): void {
   blocked = isBlocked;
-  window.addEventListener('scroll', scheduleAutoplay, { passive: true });
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('scrollend', () => {
+    clearTimeout(settleTimer);
+    autoplayPick();
+  });
+  window.addEventListener('touchstart', () => (touching = true), { passive: true });
+  for (const end of ['touchend', 'touchcancel']) window.addEventListener(end, () => (touching = false), { passive: true });
   window.addEventListener('resize', placeLayer);
-  new ResizeObserver(placeLayer).observe(document.getElementById('app')!);
+  // A size change can bring a box into frame without a scroll (More/Less, images above it).
+  new ResizeObserver(() => {
+    placeLayer();
+    scheduleAutoplay();
+  }).observe(document.getElementById('app')!);
 }
 
 /**
  * After every render and on a switch change: show the switch's state; stop the video if its box left the DOM; and
- * (autoplay on) observe every `.yt-box` against the area under the sticky nav. A box with ratio ≥ 0.5 is in frame
- * (YouTube's rule is more than half visible; ≥ allows for the observer's rounding at exactly the threshold).
- * Autoplay off observes nothing: a tapped video plays on, and a tap still keeps one player.
+ * (autoplay on) observe every `.yt-box` for nearFrame. Autoplay off observes nothing: a tapped video plays on, and a
+ * tap still keeps one player.
  */
 export function watchVideos(): void {
   document.querySelector('[data-act="autoplay"]')?.setAttribute('aria-pressed', String(autoplayOn));
   if (current && !current.box.isConnected) stopPlayer();
   videoObserver?.disconnect();
   videoObserver = null;
-  inFrame.clear();
+  nearFrame.clear();
   clearTimeout(settleTimer);
   if (!autoplayOn) return;
-  const top = navBar()?.offsetHeight ?? 0;
   videoObserver = new IntersectionObserver(
     (entries) => {
       for (const e of entries) {
-        if (e.intersectionRatio >= 0.5) inFrame.add(e.target as HTMLElement);
-        else inFrame.delete(e.target as HTMLElement);
+        if (e.isIntersecting) nearFrame.add(e.target as HTMLElement);
+        else nearFrame.delete(e.target as HTMLElement);
       }
       scheduleAutoplay();
     },
-    { rootMargin: `-${top}px 0px 0px 0px`, threshold: [0, 0.5] },
+    { rootMargin: '100% 0px' },
   );
   for (const box of document.querySelectorAll<HTMLElement>('#app .yt-box')) videoObserver.observe(box);
+}
+
+/**
+ * Every scroll event: restart the settle timer, and pick at once when a glide (finger up) has been slow for
+ * GLIDE_MS: on iPhone the last stretch of a glide creeps for a long time before it stops.
+ */
+function onScroll(): void {
+  const now = performance.now();
+  const speed = Math.abs(window.scrollY - lastScroll.y) / Math.max(now - lastScroll.at, 1);
+  lastScroll = { y: window.scrollY, at: now };
+  scheduleAutoplay();
+  if (touching || speed >= GLIDE_PX_PER_MS) {
+    slowSince = 0;
+  } else if (!slowSince) {
+    slowSince = now;
+  } else if (now - slowSince >= GLIDE_MS) {
+    autoplayPick();
+  }
 }
 
 /**
@@ -176,24 +212,26 @@ export function playerLive(): boolean {
 // ---------- choosing a video ----------
 
 /**
- * The settle timer's work. Re-place the layer first (a box skipped by content-visibility may have moved). Then, with
- * autoplay on and nothing held, hidden or blocked: no box in frame stops the video (it scrolled away); otherwise the
- * box nearest the centre of the area under the nav plays, unless the video is already there.
+ * The settle timer's (and scrollend's, and a slow glide's) work. Re-place the layer first (a box skipped by
+ * content-visibility may have moved). Then, with autoplay on and nothing held, hidden or blocked: of the boxes at
+ * least half visible under the nav (YouTube's rule), the one nearest the centre plays, unless the video is already
+ * there; none stops the video (it scrolled away).
  */
 function autoplayPick(): void {
   placeLayer();
   if (!autoplayOn || autoplayHolds > 0 || document.hidden || blocked()) return;
-  if (inFrame.size === 0) return stopPlayer();
   const top = navBar()?.getBoundingClientRect().bottom ?? 0;
-  const mid = (top + window.innerHeight) / 2;
+  const bottom = window.innerHeight;
   let best: HTMLElement | null = null;
   let bestDistance = Infinity;
-  for (const box of inFrame) {
+  for (const box of nearFrame) {
     const r = box.getBoundingClientRect();
-    const distance = Math.abs((r.top + r.bottom) / 2 - mid);
+    if (Math.min(r.bottom, bottom) - Math.max(r.top, top) < r.height / 2) continue;
+    const distance = Math.abs((r.top + r.bottom) / 2 - (top + bottom) / 2);
     if (distance < bestDistance) [best, bestDistance] = [box, distance];
   }
-  if (best && current?.box !== best) play(best, true);
+  if (!best) return stopPlayer();
+  if (current?.box !== best) play(best, true);
 }
 
 /**
@@ -206,6 +244,8 @@ function play(box: HTMLElement, autoplayed: boolean): void {
   if (!id) return;
   stopPlayer();
   current = { box, id, autoplayed };
+  const now = performance.now();
+  timing = { id, at: now, wait: lastScroll.at ? Math.round(now - lastScroll.at) : 0 };
   if (mode === 'frames' || failed.has(id)) return playInCard();
   if (mode === 'api') return playInLayer();
   if (!autoplayed) playInCard(); // a tap shows a player at once; the next video can use the layer
@@ -306,6 +346,12 @@ function createPlayer(start: number): void {
         if (current.id !== created) player.loadVideoById({ videoId: current.id, startSeconds: resumeAt.get(current.id) ?? 0 });
       },
       onError: onPlayerError,
+      onStateChange: (e) => {
+        // 1: playing. Read with Safari's Web Inspector: is the lag our wait or YouTube's start?
+        if (e.data !== 1 || !current || current.card || timing?.id !== current.id) return;
+        console.info(`[yt] ${current.id}: ${timing.wait} ms after the last scroll, playing ${Math.round(performance.now() - timing.at)} ms later`);
+        timing = null;
+      },
       onAutoplayBlocked,
     },
   });

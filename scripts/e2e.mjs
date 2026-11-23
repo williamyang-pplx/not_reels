@@ -351,10 +351,12 @@ INSERT INTO FeedItem (id,feedId,guid,title,link,publishedAt,sourceRank,fetchedAt
   })();`;
   const contexts = [];
   /** A fresh iPhone page on the video topic, under New; `api` is 'fake' or 'abort', `delay` holds the fake back. */
-  async function videoPage({ api = 'fake', noReady = false, delay = 0 } = {}) {
+  async function videoPage({ api = 'fake', noReady = false, delay = 0, noScrollend = false } = {}) {
     const c = await browser.newContext({ ...devices['iPhone 14 Pro'] });
     contexts.push(c);
     if (noReady) await c.addInitScript(() => (window.__ytNoReady = true));
+    // Each programmatic scroll step fires scrollend in Chrome; a real glide (or Safari without scrollend) does not.
+    if (noScrollend) await c.addInitScript(() => window.addEventListener('scrollend', (e) => e.stopImmediatePropagation(), true));
     const p = await c.newPage();
     p.on('pageerror', (e) => errors.push(String(e)));
     await p.route(/youtube-nocookie\.com|i\.ytimg\.com/, (r) => r.abort());
@@ -520,6 +522,26 @@ INSERT INTO FeedItem (id,feedId,guid,title,link,publishedAt,sourceRank,fetchedAt
   await tap(vp, 0);
   assert.equal((await cardFrames(vp)).length, 1);
   ok('a video that scrolled away while the API loaded never starts; a tap while it loads plays in the card at once');
+
+  // A slow glide (finger up, under 0.25 px/ms) toward video 1 switches to it before the scrolling stops; the settle
+  // timer alone would wait for the end, since scroll events keep coming.
+  vp = await videoPage({ noScrollend: true });
+  await centre(vp, 0);
+  await vp.waitForFunction(() => window.__yt?.calls.length, null, { timeout: 5000 });
+  await settle(vp, 300);
+  const glide = await vp.evaluate(async (v) => {
+    const r = document.querySelectorAll('.yt-box')[1].getBoundingClientRect();
+    const top = document.querySelector('[data-testid=nav-bar]').getBoundingClientRect().bottom;
+    const steps = Math.ceil(((r.top + r.bottom) / 2 - (top + innerHeight) / 2) / 3);
+    for (let i = 0; i < steps; i++) {
+      window.scrollBy(0, 3);
+      await new Promise((res) => setTimeout(res, 20));
+      if (window.__yt.calls.some((c) => c[0] === 'load' && c[1] === v)) return { pickedAt: i, steps };
+    }
+    return { pickedAt: -1, steps };
+  }, vids[1]);
+  assert.ok(glide.pickedAt >= 0 && glide.pickedAt < glide.steps - 1, JSON.stringify(glide));
+  ok(`a slow glide starts the next video before it stops (step ${glide.pickedAt} of ${glide.steps})`);
   for (const c of contexts) await c.close();
 
   assert.deepEqual(errors, []);
