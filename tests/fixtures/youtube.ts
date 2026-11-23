@@ -55,21 +55,47 @@ export function dailyPages(count: number, newest: string) {
 }
 
 /** A YouTube RSS entry as rss-parser hands it over (Atom: no <guid>, link to /watch or /shorts/). */
-export function rssItem(id: string, isoDate: string, opts: { short?: boolean; title?: string; description?: string } = {}) {
+/**
+ * A YouTube RSS entry as rss-parser hands it over. `views` (default 100, so a refresh leaves no video unchecked and
+ * starts no count pass) goes in <media:community><media:statistics>; null leaves it out.
+ */
+export function rssItem(
+  id: string,
+  isoDate: string,
+  opts: { short?: boolean; title?: string; description?: string; views?: number | null } = {},
+) {
+  const views = opts.views === undefined ? 100 : opts.views;
   return {
     title: opts.title ?? `Video ${id}`,
     link: opts.short ? `https://www.youtube.com/shorts/${id}` : `https://www.youtube.com/watch?v=${id}`,
     isoDate,
     author: 'Google for Developers',
-    mediaGroup: { 'media:description': [opts.description ?? `About ${id}\nhttps://sponsor.example/${id}`] },
+    mediaGroup: {
+      'media:description': [opts.description ?? `About ${id}\nhttps://sponsor.example/${id}`],
+      ...(views === null ? {} : { 'media:community': [{ 'media:statistics': [{ $: { views: String(views) } }] }] }),
+    },
   };
 }
 
-/** Insert `count` archive videos for a channel, one day apart from `newest` back. Ids are a<channel tail><i>. */
+/** A videos.list?part=statistics answer for the IDs in `url`; `views` gives each one's count (undefined: left out). */
+export function statsAnswer(url: string, views: (id: string) => number | undefined = () => 5) {
+  const ids = new URL(url).searchParams.get('id')!.split(',');
+  return {
+    items: ids.flatMap((id) => {
+      const n = views(id);
+      return n === undefined ? [] : [{ id, statistics: { viewCount: String(n) } }];
+    }),
+  };
+}
+
+/**
+ * Insert `count` archive videos for a channel, one day apart from `newest` back. Ids are <prefix><i>. `views` gives
+ * each one's count (default 1000 - i, so the newest are the most viewed; null: not checked).
+ */
 export async function seedVideos(
   channelId: string,
   count: number,
-  opts: { newest?: string; shortEvery?: number; prefix?: string } = {},
+  opts: { newest?: string; shortEvery?: number; prefix?: string; views?: (i: number) => number | null } = {},
 ): Promise<string[]> {
   const { saveYouTubeVideos } = await import('../../src/lib/youtube-archive');
   const newest = Date.parse(opts.newest ?? '2015-12-31T12:00:00Z');
@@ -82,6 +108,7 @@ export async function seedVideos(
     author: 'Vsauce',
     uploadedAt: newest - i * 86_400_000,
     isShort: opts.shortEvery ? i % opts.shortEvery === 0 : false,
+    viewCount: opts.views ? opts.views(i) : 1000 - i,
   }));
   saveYouTubeVideos(rows);
   return rows.map((r) => r.videoId);

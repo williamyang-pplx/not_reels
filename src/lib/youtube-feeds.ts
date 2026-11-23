@@ -19,7 +19,8 @@ export function youTubeRssUrl(channelId: string): string {
 
 /**
  * The videos in a channel's RSS items. A /shorts/<id> link marks a Short; items without a video ID or a date are
- * skipped. The summary is the cleaned <media:description>, trimmed to 1,000 characters.
+ * skipped. The summary is the cleaned <media:description>, trimmed to 1,000 characters; the view count is
+ * <media:statistics views>, or null.
  */
 export function rssVideos(items: RawRssItem[], channelId: string): YouTubeVideoRow[] {
   const videos: YouTubeVideoRow[] = [];
@@ -36,9 +37,15 @@ export function rssVideos(items: RawRssItem[], channelId: string): YouTubeVideoR
       author: (item.creator ?? item.author)?.trim() || null,
       uploadedAt,
       isShort: new URL(link).pathname.startsWith('/shorts/'),
+      viewCount: rssViews(item),
     });
   }
   return videos;
+}
+
+function rssViews(item: RawRssItem): number | null {
+  const views = Number(item.mediaGroup?.['media:community']?.[0]?.['media:statistics']?.[0]?.$?.views ?? NaN);
+  return Number.isFinite(views) && views >= 0 ? views : null;
 }
 
 /** One video as a post. The watch URL is guid and link, so a video is one post whichever source brings it. */

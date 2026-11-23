@@ -49,9 +49,22 @@ describe('rssVideos', () => {
         author: 'Google for Developers',
         uploadedAt: Date.parse('2026-11-20T20:00:04Z'),
         isShort: false,
+        viewCount: 100,
       },
       expect.objectContaining({ videoId: 'cv8tEbKtEvk', isShort: true }),
     ]);
+  });
+
+  it('reads the views from media:statistics, or null without a numeric count', () => {
+    const [counted, none, bad] = rssVideos(
+      [
+        rssItem('aaaaaaaaaaa', '2026-11-20T00:00:00Z', { views: 2575403 }),
+        rssItem('bbbbbbbbbbb', '2026-11-20T00:00:00Z', { views: null }),
+        { ...rssItem('ccccccccccc', '2026-11-20T00:00:00Z'), mediaGroup: { 'media:community': [{ 'media:statistics': [{ $: { views: 'n/a' } }] }] } },
+      ],
+      CHANNEL_ID,
+    );
+    expect([counted.viewCount, none.viewCount, bad.viewCount]).toEqual([2575403, null, null]);
   });
 
   it('falls back to (untitled), trims the summary and skips items without a video or a date', () => {

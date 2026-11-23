@@ -14,8 +14,14 @@ export type RawRssItem = {
   'content:encodedSnippet'?: string;
   /** Atom <summary> (HTML). */
   summary?: string;
-  /** YouTube puts the video description only in <media:group><media:description>. */
-  mediaGroup?: { 'media:description'?: string[] };
+  /**
+   * YouTube puts the video description only in <media:group><media:description>, and the views in
+   * <media:community><media:statistics views="…"> (xml2js keeps attributes under `$`).
+   */
+  mediaGroup?: {
+    'media:description'?: string[];
+    'media:community'?: { 'media:statistics'?: { $?: { views?: string } }[] }[];
+  };
   creator?: string;
   author?: string;
   /** The raw HTML of <content:encoded> (rss-parser keeps it); Redlib's subreddit RSS puts a post's images and video here. */

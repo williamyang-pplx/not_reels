@@ -122,7 +122,8 @@ CREATE TABLE IF NOT EXISTS "YouTubeVideo" (
   "author" TEXT,
   "uploadedAt" DATETIME NOT NULL,
   "isShort" BOOLEAN NOT NULL DEFAULT false,
-  "lastShownAt" DATETIME
+  "lastShownAt" DATETIME,
+  "viewCount" INTEGER
 );
 CREATE INDEX IF NOT EXISTS "YouTubeVideo_channelId_uploadedAt_idx" ON "YouTubeVideo"("channelId", "uploadedAt");
 CREATE TABLE IF NOT EXISTS "YouTubeChannel" (
@@ -227,9 +228,11 @@ function addColumnIfMissing(conn: DB, table: string, column: string, type: strin
 }
 
 /**
- * Add the YouTube columns to an older DB: Feed's range, Shorts, Recent and Archive settings, and FeedItem.uploadedAt.
- * Each column is checked on its own (a DB from an earlier build of this branch has only the first three).
- * YouTubeVideo and YouTubeChannel come from CREATE TABLE IF NOT EXISTS.
+ * Add the YouTube columns to an older DB: Feed's range, Shorts, Recent and Archive settings, FeedItem.uploadedAt and
+ * YouTubeVideo.viewCount (null: not checked; -1: gone). Each column is checked on its own (a DB from an earlier build
+ * of this branch has only the first three). YouTubeVideo and YouTubeChannel come from CREATE TABLE IF NOT EXISTS,
+ * which skips an existing table, hence the ADD COLUMN for viewCount. A nullable column with no default is added
+ * without rewriting the table.
  */
 function addFeedYouTubeSettings(conn: DB): void {
   conn.transaction(() => {
@@ -239,6 +242,7 @@ function addFeedYouTubeSettings(conn: DB): void {
     addColumnIfMissing(conn, 'Feed', 'showRecent', 'BOOLEAN');
     addColumnIfMissing(conn, 'Feed', 'showArchive', 'BOOLEAN');
     addColumnIfMissing(conn, 'FeedItem', 'uploadedAt', 'DATETIME');
+    addColumnIfMissing(conn, 'YouTubeVideo', 'viewCount', 'INTEGER');
   })();
 }
 

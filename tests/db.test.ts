@@ -221,10 +221,28 @@ describe('migrate', () => {
     expect(columns(conn).filter((c) => c === 'includeShorts')).toHaveLength(1);
   });
 
+  it('adds YouTubeVideo.viewCount to an older database, keeping its rows', () => {
+    const conn = open();
+    migrate(conn);
+    conn.exec(`DROP TABLE "YouTubeVideo";
+      CREATE TABLE "YouTubeVideo" ("videoId" TEXT NOT NULL PRIMARY KEY, "channelId" TEXT NOT NULL, "title" TEXT NOT NULL,
+        "summary" TEXT, "author" TEXT, "uploadedAt" DATETIME NOT NULL, "isShort" BOOLEAN NOT NULL DEFAULT false,
+        "lastShownAt" DATETIME);
+      INSERT INTO "YouTubeVideo" ("videoId", "channelId", "title", "uploadedAt", "lastShownAt") VALUES ('v1', 'UC1', 'Old', 1, 5);`);
+    migrate(conn);
+    migrate(conn);
+    const viewColumns = conn.prepare(`SELECT "name" FROM pragma_table_info('YouTubeVideo') WHERE "name" = 'viewCount'`).all();
+    expect(viewColumns).toHaveLength(1);
+    expect(conn.prepare('SELECT "title", "lastShownAt", "viewCount" FROM "YouTubeVideo"').all()).toEqual([
+      { title: 'Old', lastShownAt: 5, viewCount: null },
+    ]);
+  });
+
   it('is idempotent on a fresh DB', () => {
     const conn = open();
     migrate(conn);
     migrate(conn);
+    expect(conn.prepare(`SELECT 1 AS ok FROM pragma_table_info('YouTubeVideo') WHERE "name" = 'viewCount'`).get()).toEqual({ ok: 1 });
     expect(columns(conn)).not.toContain('type');
     expect(columns(conn)).toContain('sourceKind');
     expect(conn.prepare(`SELECT 1 AS ok FROM pragma_table_info('Topic') WHERE "name" = 'position'`).get()).toEqual({ ok: 1 });

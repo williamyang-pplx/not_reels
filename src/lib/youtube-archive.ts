@@ -1,12 +1,20 @@
 import { getDb } from '../db';
-import { YOUTUBE_FILL_MAX_PAGES } from './constants';
+import { YOUTUBE_FILL_MAX_PAGES, YOUTUBE_TOP_SHARE } from './constants';
 import type { YouTubeFeedOptions } from './types';
 import { cleanVideoDescription } from './utils';
-import { defaultJsonFetcher, pagePlaylist, youTubeApiKey, type JsonFetcher, type PlaylistEntry } from './youtube-api';
+import {
+  defaultJsonFetcher,
+  fetchViewCounts,
+  pagePlaylist,
+  youTubeApiKey,
+  type JsonFetcher,
+  type PlaylistEntry,
+} from './youtube-api';
 
 /**
  * A YouTube channel's archive: every video the app has seen for it (the YouTubeVideo table), from RSS refreshes and
- * from one back catalog fill through the Data API. Archive picks and the Manage counts read it.
+ * from one back catalog fill through the Data API, with each video's view count (from RSS, or one Data API pass).
+ * Archive picks and the Manage counts read it.
  */
 
 const SUMMARY_MAX = 1000;
@@ -20,6 +28,8 @@ export interface YouTubeVideoRow {
   author: string | null;
   uploadedAt: number;
   isShort: boolean;
+  /** Views from RSS or the Data API pass; null until checked, -1 when the API says the video is gone. */
+  viewCount: number | null;
 }
 
 /** A video description as an archive summary: the cleaned prose, at most 1,000 characters, or null. */
@@ -27,26 +37,43 @@ export function videoSummary(description: string | undefined): string | null {
   return cleanVideoDescription(description ?? '').trim().slice(0, SUMMARY_MAX).trim() || null;
 }
 
-const INSERT_COLUMNS = `"videoId", "channelId", "title", "summary", "author", "uploadedAt", "isShort"`;
-const INSERT_VALUES = `@videoId, @channelId, @title, @summary, @author, @uploadedAt, @isShort`;
+// Shared by the save insert, the pick SELECT and the fill upsert.
+const INSERT_COLUMNS = `"videoId", "channelId", "title", "summary", "author", "uploadedAt", "isShort", "viewCount"`;
+const INSERT_VALUES = `@videoId, @channelId, @title, @summary, @author, @uploadedAt, @isShort, @viewCount`;
 
 const bindRow = (v: YouTubeVideoRow) => ({ ...v, isShort: v.isShort ? 1 : 0 });
 
-/** INSERT OR IGNORE each video; returns how many were new. A known video keeps its row and lastShownAt. */
+/**
+ * INSERT OR IGNORE each video, then give a known one the RSS view count when the item has one (free and fresher). A
+ * known video keeps its row and lastShownAt. Returns how many were new.
+ */
 export function saveYouTubeVideos(videos: YouTubeVideoRow[]): number {
   if (videos.length === 0) return 0;
   const db = getDb();
   const insert = db.prepare(`INSERT OR IGNORE INTO "YouTubeVideo" (${INSERT_COLUMNS}) VALUES (${INSERT_VALUES})`);
-  return db.transaction(() => videos.reduce((n, v) => n + insert.run(bindRow(v)).changes, 0))();
+  const count = db.prepare(
+    `UPDATE "YouTubeVideo" SET "viewCount" = @viewCount WHERE "videoId" = @videoId AND @viewCount IS NOT NULL`,
+  );
+  return db.transaction(() =>
+    videos.reduce((n, v) => {
+      const added = insert.run(bindRow(v)).changes;
+      count.run(bindRow(v));
+      return n + added;
+    }, 0),
+  )();
 }
 
 interface VideoRecord extends Omit<YouTubeVideoRow, 'isShort'> {
   isShort: number;
+  grp: 1 | 2 | 3;
 }
 
 /**
- * `count` of the channel's videos for an archive refresh: inside the range, Shorts only when on, none of `exclude`;
- * never-shown first, then the least recently shown, random among equals.
+ * `count` of the channel's videos for an archive refresh, of those inside the range, Shorts only when on, not gone,
+ * none of `exclude`, nor saved or hidden. Counted videos are split into halves by views; YOUTUBE_TOP_SHARE of the
+ * picks come from the top half and the rest from the bottom, a short half made up from the other; videos not counted
+ * yet only fill what the counted ones can't. Inside each group: never-shown first, then the least recently shown,
+ * random among equals. Top-half picks first.
  */
 export function pickArchiveVideos(
   channelId: string,
@@ -54,14 +81,41 @@ export function pickArchiveVideos(
   exclude: string[],
   count: number,
 ): YouTubeVideoRow[] {
+  if (count <= 0) return [];
+  const { top, bottom, uncounted } = rankedGroups(channelId, options, exclude, count);
+  const counted = Math.min(count, top.length + bottom.length);
+  const takeTop = Math.min(top.length, Math.max(Math.round(count * YOUTUBE_TOP_SHARE), counted - bottom.length));
+  return [...top.slice(0, takeTop), ...bottom.slice(0, counted - takeTop), ...uncounted.slice(0, count - counted)];
+}
+
+/**
+ * Up to `limit` videos of each group, in pick order, in one query: 1 = top half, 2 = bottom half (NTILE(2) over the
+ * eligible counted videos by viewCount, videoId breaking ties; an odd count puts the middle video on top), 3 = not
+ * counted yet. Halves are set before `exclude` and saved/hidden videos are taken out, so a video's half doesn't move
+ * as others are picked. Saved and hidden URLs are excluded in the SQL, as in the feed query.
+ */
+function rankedGroups(
+  channelId: string,
+  options: YouTubeFeedOptions,
+  exclude: string[],
+  limit: number,
+): { top: YouTubeVideoRow[]; bottom: YouTubeVideoRow[]; uncounted: YouTubeVideoRow[] } {
   const rows = getDb()
     .prepare(
-      `SELECT ${INSERT_COLUMNS} FROM "YouTubeVideo"
-        WHERE "channelId" = ? AND (? = 1 OR "isShort" = 0)
-          AND (? IS NULL OR "uploadedAt" >= ?) AND (? IS NULL OR "uploadedAt" < ?)
-          AND "videoId" NOT IN (${exclude.map(() => '?').join(',')})
-        ORDER BY "lastShownAt" IS NOT NULL, "lastShownAt", random()
-        LIMIT ?`,
+      `WITH eligible AS (
+         SELECT ${INSERT_COLUMNS}, "lastShownAt",
+           CASE WHEN "viewCount" IS NULL THEN 3
+                ELSE NTILE(2) OVER (PARTITION BY "viewCount" IS NULL ORDER BY "viewCount" DESC, "videoId") END AS grp
+         FROM "YouTubeVideo"
+         WHERE "channelId" = ? AND ("viewCount" IS NULL OR "viewCount" >= 0) AND (? = 1 OR "isShort" = 0)
+           AND (? IS NULL OR "uploadedAt" >= ?) AND (? IS NULL OR "uploadedAt" < ?)
+       ), ranked AS (
+         SELECT *, ROW_NUMBER() OVER (PARTITION BY grp ORDER BY "lastShownAt" IS NOT NULL, "lastShownAt", random()) AS rk
+         FROM eligible
+         WHERE "videoId" NOT IN (${exclude.map(() => '?').join(',')})
+           AND 'https://www.youtube.com/watch?v=' || "videoId" NOT IN (SELECT "url" FROM "SavedLink" UNION SELECT "url" FROM "HiddenLink")
+       )
+       SELECT ${INSERT_COLUMNS}, grp FROM ranked WHERE rk <= ? ORDER BY grp, rk`,
     )
     .all(
       channelId,
@@ -71,9 +125,19 @@ export function pickArchiveVideos(
       options.publishedBefore,
       options.publishedBefore,
       ...exclude,
-      count,
+      limit,
     ) as VideoRecord[];
-  return rows.map((r) => ({ ...r, uploadedAt: Number(r.uploadedAt), isShort: r.isShort === 1 }));
+  const groups = { top: [] as YouTubeVideoRow[], bottom: [] as YouTubeVideoRow[], uncounted: [] as YouTubeVideoRow[] };
+  for (const { grp, ...r } of rows) {
+    const video = {
+      ...r,
+      uploadedAt: Number(r.uploadedAt),
+      isShort: r.isShort === 1,
+      viewCount: r.viewCount === null ? null : Number(r.viewCount),
+    };
+    (grp === 1 ? groups.top : grp === 2 ? groups.bottom : groups.uncounted).push(video);
+  }
+  return groups;
 }
 
 /** Set lastShownAt for these videos; called once a refresh has stored them. */
@@ -116,9 +180,11 @@ export function archiveInfo(channelIds: string[]): Map<string, ArchiveInfo> {
 const fills = new Map<string, Promise<void>>();
 
 /**
- * Start the channel's back catalog fill unless it is filled or already running; `onFilled` runs after a successful
- * fill. Detached on purpose: a fill is ~25 API calls and the refresh that starts it must not wait. A failed fill
- * leaves the channel unfilled, so the next refresh tries again. Returns the fill's promise for tests.
+ * Start the channel's background job unless it is running or has nothing to do: the back catalog fill (once), then
+ * view counts for the videos never checked (once each). `onFilled` runs when the job saved videos or counts, so the
+ * feed re-picks with them. Detached on purpose: a fill is ~25 API calls and the refresh that starts it must not
+ * wait. A failed fill is stored in fillError; a failed count pass only logs (a filled channel's label ignores
+ * fillError). Either is tried again on the next refresh. Returns the job's promise for tests.
  */
 export function startYouTubeFill(
   channelId: string,
@@ -129,11 +195,19 @@ export function startYouTubeFill(
   const row = getDb().prepare('SELECT "filledAt" FROM "YouTubeChannel" WHERE "channelId" = ?').get(channelId) as
     | { filledAt: number | null }
     | undefined;
-  if (row?.filledAt != null) return Promise.resolve();
-  const fill = fillYouTubeChannel(channelId, opts.fetchJson ?? defaultJsonFetcher)
-    .then(async () => {
-      await opts.onFilled?.();
-    })
+  const filled = row?.filledAt != null;
+  if (filled && !hasUncheckedViews(channelId)) return Promise.resolve();
+  const fetchJson = opts.fetchJson ?? defaultJsonFetcher;
+  const fill = (async () => {
+    if (!filled) await fillYouTubeChannel(channelId, fetchJson);
+    let counted = 0;
+    try {
+      counted = await fillViewCounts(channelId, fetchJson);
+    } catch (err) {
+      console.error(`[youtube] view counts failed channel=${channelId}:`, err instanceof Error ? err.message : err);
+    }
+    if (!filled || counted > 0) await opts.onFilled?.();
+  })()
     .catch((err: unknown) => {
       console.error(`[youtube] fill failed channel=${channelId}:`, err instanceof Error ? err.message : err);
     })
@@ -154,6 +228,7 @@ function entryRow(channelId: string, entry: PlaylistEntry, isShort: boolean): Yo
     author: entry.author,
     uploadedAt: entry.uploadedAt,
     isShort,
+    viewCount: null, // checked by fillViewCounts after the fill
   };
 }
 
@@ -194,6 +269,40 @@ async function fillYouTubeChannel(channelId: string, fetchJson: JsonFetcher): Pr
     recordError.run(channelId, err instanceof Error ? err.message : String(err));
     throw err;
   }
+}
+
+/** Whether the channel has a video whose views were never checked (by RSS or the Data API pass). */
+function hasUncheckedViews(channelId: string): boolean {
+  return (
+    getDb()
+      .prepare('SELECT EXISTS(SELECT 1 FROM "YouTubeVideo" WHERE "channelId" = ? AND "viewCount" IS NULL) AS e')
+      .get(channelId) as { e: number }
+  ).e === 1;
+}
+
+/**
+ * Fetch the views of every unchecked video of the channel (50 a call, 1 unit each), then store them in one
+ * transaction: the count, or -1 for a video the API didn't return (gone: never picked, never asked again). A video
+ * RSS counted meanwhile keeps its count. Returns how many were checked. Throws, storing nothing, on a missing key or
+ * an API error.
+ */
+async function fillViewCounts(channelId: string, fetchJson: JsonFetcher): Promise<number> {
+  const db = getDb();
+  const ids = (
+    db.prepare('SELECT "videoId" FROM "YouTubeVideo" WHERE "channelId" = ? AND "viewCount" IS NULL').all(channelId) as {
+      videoId: string;
+    }[]
+  ).map((r) => r.videoId);
+  if (ids.length === 0) return 0;
+  const key = youTubeApiKey();
+  if (!key) throw new Error('YOUTUBE_API_KEY is not set');
+  const counts = await fetchViewCounts(ids, key, fetchJson);
+  const store = db.prepare('UPDATE "YouTubeVideo" SET "viewCount" = ? WHERE "videoId" = ? AND "viewCount" IS NULL');
+  db.transaction(() => {
+    for (const id of ids) store.run(counts.get(id) ?? -1, id);
+  })();
+  console.log(`[youtube] view counts channel=${channelId}: ${ids.length} videos`);
+  return ids.length;
 }
 
 /** Wait for every running fill; tests await it so no fill outlives its test. */

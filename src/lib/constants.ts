@@ -28,6 +28,8 @@ export const MAX_ITEMS_PER_FEED = 30;
 export const YOUTUBE_FEED_ITEMS = 15;
 export const YOUTUBE_RECENT_MAX = 4;
 export const YOUTUBE_RECENT_DAYS = 30;
+/** Share of a refresh's archive picks from the top half of the channel's videos by views (rounded); the rest from the bottom. */
+export const YOUTUBE_TOP_SHARE = 0.75;
 /** Most playlistItems pages (50 videos, 1 quota unit each) one channel fill reads per playlist: 20,000 videos. */
 export const YOUTUBE_FILL_MAX_PAGES = 400;
 

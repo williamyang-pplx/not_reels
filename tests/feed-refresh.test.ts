@@ -4,7 +4,7 @@ import type { ParsedFeed } from '../src/lib/rss-fetcher';
 import { resetDb, createFeed, itemsOf, itemByGuid, countItems, feedRow } from './helpers';
 import { MAX_ITEMS_PER_FEED } from '../src/lib/constants';
 import { LISTING_HTML, RSS_ITEMS } from './fixtures/redlib';
-import { CHANNEL_ID, CHANNEL_URL, playlistPage, rssItem, seedVideos, video } from './fixtures/youtube';
+import { CHANNEL_ID, CHANNEL_URL, playlistPage, rssItem, seedVideos, statsAnswer, video } from './fixtures/youtube';
 import { getDb } from '../src/db';
 
 function fakeFetcher(items: Array<{ guid?: string; title?: string; link?: string; isoDate?: string }>): () => Promise<ParsedFeed> {
@@ -329,6 +329,7 @@ describe('refreshSingleFeed (YOUTUBE)', () => {
     const feed = youTubeFeed({ showRecent: 0 });
     const uploads = playlistPage([video('f0000000000', '2012-05-01T00:00:00Z'), video('f0000000001', '2012-04-01T00:00:00Z')]);
     const youTubeFetcher = vi.fn(async (url: string) => {
+      if (url.includes('/videos?')) return statsAnswer(url);
       if (new URL(url).searchParams.get('playlistId')!.startsWith('UUSH')) throw new Error('YouTube API 404 playlistNotFound');
       return uploads;
     });
@@ -336,7 +337,7 @@ describe('refreshSingleFeed (YOUTUBE)', () => {
     const { settleYouTubeFills } = await import('../src/lib/youtube-archive');
     await settleYouTubeFills();
     expect(itemsOf(feed.id).map((i) => i.link.slice(-11))).toEqual(expect.arrayContaining(['f0000000000', 'f0000000001']));
-    expect(youTubeFetcher).toHaveBeenCalledTimes(2);
+    expect(youTubeFetcher).toHaveBeenCalledTimes(3); // UU, UUSH, then the view counts
     vi.unstubAllEnvs();
   });
 

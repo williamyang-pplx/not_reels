@@ -42,8 +42,10 @@ The design is in `documentation/low_level_plan.md` and `documentation/framework_
   sources: its RSS feed (Recent, 15 newest; Shorts are `/shorts/` links) and an archive, the `YouTubeVideo` table
   (`src/lib/youtube-archive.ts`), which every RSS video joins and which a one-time background fill per channel pages
   through the Data API (`src/lib/youtube-api.ts`). Each refresh makes at most 15 posts, replacing the last batch: up
-  to 4 RSS videos from the past 30 days and never-shown-first archive picks for the rest; refresh never calls the API. `YOUTUBE_API_KEY` (a Fly secret) is used for handle lookups and fills
-  only. Never put a request URL in an error or log: it carries the key. See spec §7.2.
+  to 4 RSS videos from the past 30 days and never-shown-first archive picks for the rest, 75% from the channel's top
+  half by views (`YouTubeVideo.viewCount`, from RSS or one `videos.list` pass per video; uncounted videos only fill
+  gaps). A refresh never calls the API; `YOUTUBE_API_KEY` (a Fly secret) is used for handle lookups, fills and view
+  counts only. Never put a request URL in an error or log: it carries the key. See spec §7.2.
 
 ## Conventions
 - API errors use `fail(c, message, code, status)` and the `{ error: { message, code } }` envelope. Validate with the Zod schemas in `src/lib/validations.ts`.

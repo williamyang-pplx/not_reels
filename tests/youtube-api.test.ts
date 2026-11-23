@@ -2,12 +2,13 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
   canonicalYouTubeFeedUrl,
   defaultJsonFetcher,
+  fetchViewCounts,
   pagePlaylist,
   parseYouTubeChannelUrl,
   parseYouTubeFeedUrl,
   YouTubeLookupError,
 } from '../src/lib/youtube-api';
-import { CHANNEL_ID, CHANNEL_URL, dailyPages, pagedFetcher, playlistPage, privateVideo, video } from './fixtures/youtube';
+import { CHANNEL_ID, CHANNEL_URL, dailyPages, pagedFetcher, playlistPage, privateVideo, statsAnswer, video } from './fixtures/youtube';
 
 const KEY = 'test-key';
 
@@ -147,5 +148,35 @@ describe('pagePlaylist', () => {
       throw new Error('YouTube API 403 quotaExceeded');
     };
     await expect(pagePlaylist('UUx', KEY, quota, 400)).rejects.toThrow('quotaExceeded');
+  });
+});
+
+describe('fetchViewCounts', () => {
+  const ids = Array.from({ length: 120 }, (_, i) => `v${String(i).padStart(10, '0')}`);
+
+  it('asks for 50 IDs a call and reads the counts, leaving out videos the API does not return', async () => {
+    const urls: string[] = [];
+    const fetchJson = async (url: string) => {
+      urls.push(url);
+      return statsAnswer(url, (id) => (id === 'v0000000007' ? undefined : Number(id.slice(1))));
+    };
+    const counts = await fetchViewCounts(ids, 'test-key', fetchJson);
+    expect(urls).toHaveLength(3);
+    expect(urls.map((u) => new URL(u).searchParams.get('id')!.split(',').length)).toEqual([50, 50, 20]);
+    expect(urls.every((u) => new URL(u).pathname.endsWith('/videos') && new URL(u).searchParams.get('part') === 'statistics')).toBe(true);
+    expect(counts.size).toBe(119);
+    expect(counts.get('v0000000042')).toBe(42);
+    expect(counts.has('v0000000007')).toBe(false);
+  });
+
+  it('makes no call for no IDs, skips items without a numeric count, and rethrows API errors', async () => {
+    const fetchJson = vi.fn(async () => ({ items: [{ id: 'a' }, { id: 'b', statistics: { viewCount: 'many' } }] }));
+    expect((await fetchViewCounts([], 'test-key', fetchJson)).size).toBe(0);
+    expect(fetchJson).not.toHaveBeenCalled();
+    expect((await fetchViewCounts(['a', 'b'], 'test-key', fetchJson)).size).toBe(0);
+    const quota = async () => {
+      throw new Error('YouTube API 403 quotaExceeded');
+    };
+    await expect(fetchViewCounts(['a'], 'test-key', quota)).rejects.toThrow('YouTube API 403 quotaExceeded');
   });
 });

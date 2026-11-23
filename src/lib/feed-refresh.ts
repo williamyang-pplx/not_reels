@@ -145,7 +145,8 @@ async function fetchNormalizedItems(feed: FeedRecord, options: RefreshOptions): 
     const channelId = parseYouTubeFeedUrl(feed.url);
     if (!channelId) throw new Error(`Invalid YouTube feed URL: ${feed.url}`);
     const settings = youTubeOptionsFromRow(feed);
-    // The back catalog fill runs detached (a no-op once the channel is filled); its feed is refreshed when it ends.
+    // The channel's background job runs detached: the back catalog fill (once), then view counts for unchecked
+    // videos (once each); a no-op once both are done. The feed is refreshed when it saved videos or counts.
     if (settings.archive) {
       void startYouTubeFill(channelId, {
         fetchJson: options.youTubeFetcher,

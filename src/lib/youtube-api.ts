@@ -181,3 +181,24 @@ export async function pagePlaylist(
   }
   return { entries, truncated: true };
 }
+
+/**
+ * View counts for `videoIds`, through videos.list?part=statistics (50 IDs a call, 1 unit each; no call for an empty
+ * list). A video the API doesn't return (private, deleted), or returns without a numeric count, is missing from the
+ * map. Errors throw as the fetcher's, which hold no URL.
+ */
+export async function fetchViewCounts(videoIds: string[], key: string, fetchJson: JsonFetcher): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  for (let i = 0; i < videoIds.length; i += 50) {
+    const batch = videoIds.slice(i, i + 50);
+    const body = (await fetchJson(
+      `${API}/videos?part=statistics&maxResults=50&id=${encodeURIComponent(batch.join(','))}` +
+        `&fields=${encodeURIComponent('items(id,statistics/viewCount)')}&key=${encodeURIComponent(key)}`,
+    )) as { items?: { id?: string; statistics?: { viewCount?: string } }[] };
+    for (const item of body.items ?? []) {
+      const views = Number(item.statistics?.viewCount ?? NaN);
+      if (item.id && Number.isFinite(views) && views >= 0) counts.set(item.id, views);
+    }
+  }
+  return counts;
+}
