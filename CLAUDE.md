@@ -18,7 +18,8 @@ The design is in `documentation/low_level_plan.md` and `documentation/framework_
   and brotli/gzip for HTML and JSON. JSON API routes are in `src/api/*`. HTML routes are in `src/pages.tsx`, with views in `src/views/*` (hono/jsx).
 - **DB:** better-sqlite3 with raw SQL (`src/db.ts`). The schema matches the old Prisma one, and dates are integer ms. Reads shared by the API and pages
   are in `src/lib/queries.ts`. Saved and hidden URLs are excluded **inside the SQL** (`NOT IN (SELECT url …)`). Keep it there.
-- **"Primary topic"** is the lowest topic slug (FeedTopic PK order). It drives Save, the border color, the badge and topic balance.
+- **"Primary topic"** is the lowest topic slug (FeedTopic PK order). It drives Save, the border color, the badge and Hot's bucket balance (YouTube and Reddit
+  are buckets of their own; every other feed is in its primary topic's).
 - **Client** (`client/app.ts`, plus `client/youtube.ts` bundled into the same script; the only browser JS):
   - It swaps `#app` with `X-Partial: 1` fragments from a view cache (fresh for 30 s; `invalidate()` mirrors the
     old React Query keys) and prefetches on `pointerdown`.

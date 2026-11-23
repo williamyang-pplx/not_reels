@@ -126,10 +126,11 @@ interface ItemRow {
   feedUrl: string;
   media: string | null;
   uploadedAt: number | null;
+  sourceKind: string;
 }
 
 const ITEM_COLUMNS = `i."id", i."feedId", i."guid", i."title", i."link", i."summary", i."author",
-  i."publishedAt", i."sourceRank", f."name" AS feedName, f."url" AS feedUrl, i."media", i."uploadedAt"`;
+  i."publishedAt", i."sourceRank", f."name" AS feedName, f."url" AS feedUrl, i."media", i."uploadedAt", f."sourceKind"`;
 
 /** A Reddit post's stored media, or null (other feeds, or JSON that no longer parses). */
 function parseMedia(json: string | null): RedditMedia | null {
@@ -198,9 +199,11 @@ export function listFeedItems(q: FeedItemsQuery): { items: FeedItemDTO[]; nextCu
     // can't crowd the others out of the pool.
     sql = `SELECT * FROM (
              SELECT ${ITEM_COLUMNS},
-               ROW_NUMBER() OVER (PARTITION BY i."feedId" ORDER BY i."sourceRank" ASC, i."publishedAt" DESC) AS feedRank
+               ROW_NUMBER() OVER (
+                 PARTITION BY i."feedId" ORDER BY i."sourceRank" ASC, i."publishedAt" DESC, i."id" ASC
+               ) AS feedRank
              ${from}
-           ) ORDER BY feedRank ASC, "sourceRank" ASC, "publishedAt" DESC LIMIT ?`;
+           ) ORDER BY feedRank ASC, "sourceRank" ASC, "publishedAt" DESC, "id" ASC LIMIT ?`;
     take = RANKED_LIST_SIZE;
   } else if (q.sort === 'random') {
     sql = `SELECT ${ITEM_COLUMNS} ${from} ORDER BY i."publishedAt" DESC LIMIT ?`;
@@ -219,15 +222,23 @@ export function listFeedItems(q: FeedItemsQuery): { items: FeedItemDTO[]; nextCu
       .prepare('SELECT "topic", COUNT(*) AS n FROM "SavedLink" GROUP BY "topic"')
       .all() as { topic: string; n: number }[];
     const topicCounts = Object.fromEntries(counts.map((c) => [c.topic, c.n]));
+    // Any successful feed store moves this, so the order reshuffles then and stays put across reloads.
+    const { seed } = db.prepare('SELECT MAX("lastFetched") AS seed FROM "Feed" WHERE "isActive" = 1').get() as {
+      seed: number | null;
+    };
     const candidates = rows.map((r) => ({
       id: r.id,
       feedId: r.feedId,
       publishedAt: toDate(r.publishedAt),
       sourceRank: r.sourceRank,
+      // YouTube and Reddit are buckets of their own; any other feed is in its topic's (spec §6).
+      bucket: r.sourceKind === 'YOUTUBE' || r.sourceKind === 'REDDIT'
+        ? r.sourceKind
+        : (topicFiltered ? q.topic! : topicsOf(r)[0] ?? ''),
       feed: { name: r.feedName, topic: topicsOf(r)[0] ?? '' },
       row: r,
     }));
-    const ranked = recommendItems(candidates, { topicCounts, applyTopicBalance: !topicFiltered });
+    const ranked = recommendItems(candidates, { topicCounts, seed: seed ?? 0 });
     return { items: ranked.slice(0, q.limit).map((c) => mapItem(c.row, topicsOf(c.row))), nextCursor: null };
   }
 

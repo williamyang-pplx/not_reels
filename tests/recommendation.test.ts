@@ -6,6 +6,7 @@ function item(input: {
   id: string;
   feedId: string;
   topic: string;
+  bucket?: string;
   publishedAt: string;
   sourceRank?: number | null;
 }): RecommendationItem {
@@ -14,6 +15,7 @@ function item(input: {
     feedId: input.feedId,
     publishedAt: new Date(input.publishedAt),
     sourceRank: input.sourceRank ?? null,
+    bucket: input.bucket ?? input.topic,
     feed: {
       name: `Feed ${input.feedId}`,
       topic: input.topic,
@@ -43,7 +45,7 @@ describe('recommendItems', () => {
       ],
       {
         now,
-        applyTopicBalance: false,
+        applyBucketBalance: false,
       },
     );
 
@@ -71,7 +73,7 @@ describe('recommendItems', () => {
       ],
       {
         now,
-        applyTopicBalance: false,
+        applyBucketBalance: false,
         weights: { popularity: 0, recency: 1, topicAffinity: 0 },
       },
     );
@@ -98,7 +100,7 @@ describe('recommendItems', () => {
       ],
       {
         now,
-        applyTopicBalance: false,
+        applyBucketBalance: false,
         topicCounts: { MUSIC: 9, NEWS: 1 },
         weights: { popularity: 0, recency: 0, topicAffinity: 1 },
       },
@@ -121,7 +123,7 @@ describe('recommendItems', () => {
 
     const unbalanced = recommendItems(candidates, {
       now,
-      applyTopicBalance: false,
+      applyBucketBalance: false,
       topicCounts: { TECHNOLOGY: 20, NEWS: 1 },
       weights: { popularity: 0, recency: 0, topicAffinity: 1 },
     });
@@ -129,7 +131,7 @@ describe('recommendItems', () => {
 
     const balanced = recommendItems(candidates, {
       now,
-      applyTopicBalance: true,
+      applyBucketBalance: true,
       softBalanceStrength: 3,
       topicCounts: { TECHNOLOGY: 20, NEWS: 1 },
       weights: { popularity: 0, recency: 0, topicAffinity: 1 },
@@ -146,7 +148,7 @@ describe('recommendItems', () => {
         item({ id: 'a2', feedId: 'a', topic: 'NEWS', sourceRank: 2, publishedAt: '2026-04-17T09:00:00Z' }),
         item({ id: 'b0', feedId: 'b', topic: 'NEWS', sourceRank: 0, publishedAt: '2026-03-01T00:00:00Z' }),
       ],
-      { now, applyTopicBalance: false },
+      { now, applyBucketBalance: false },
     );
 
     expect(ranked.map((x) => x.id)).toEqual(['a0', 'b0', 'a1', 'a2']);
@@ -158,8 +160,31 @@ describe('recommendItems', () => {
       item({ id: `t${i}`, feedId: `t${i}`, topic: 'TECHNOLOGY', sourceRank: 0, publishedAt: '2026-04-17T11:00:00Z' }));
     const slow = item({ id: 'blog', feedId: 'blog', topic: 'COOL_BLOGS', sourceRank: 0, publishedAt: '2026-03-10T00:00:00Z' });
 
-    expect(recommendItems([...busy, slow], { now, applyTopicBalance: false }).at(-1)?.id).toBe('blog');
+    expect(recommendItems([...busy, slow], { now, applyBucketBalance: false }).at(-1)?.id).toBe('blog');
     expect(recommendItems([...busy, slow], { now }).slice(0, 2).map((x) => x.id)).toContain('blog');
+  });
+
+  it('balances buckets, so one RSS topic gets a front slot among many YouTube channels', () => {
+    const now = new Date('2026-04-17T12:00:00Z');
+    // Every item shares feed.topic, so only the bucket can separate them.
+    const channels = Array.from({ length: 10 }, (_, i) =>
+      item({ id: `yt${i}`, feedId: `yt${i}`, topic: 'NEWS', bucket: 'YOUTUBE', sourceRank: 0, publishedAt: '2026-04-17T11:00:00Z' }));
+    const blog = item({ id: 'blog', feedId: 'blog', topic: 'NEWS', sourceRank: 0, publishedAt: '2026-04-10T11:00:00Z' });
+
+    expect(recommendItems([...channels, blog], { now, applyBucketBalance: false }).at(-1)?.id).toBe('blog');
+    expect(recommendItems([...channels, blog], { now }).slice(0, 2).map((x) => x.id)).toContain('blog');
+  });
+
+  it('gives the same order for the same seed, and another order for another seed', () => {
+    const now = new Date('2026-04-17T12:00:00Z');
+    const candidates = Array.from({ length: 20 }, (_, i) =>
+      item({ id: `i${i}`, feedId: `f${i}`, topic: 'NEWS', sourceRank: 0, publishedAt: '2026-04-17T11:00:00Z' }));
+    const order = (seed?: number) => recommendItems(candidates, { now, seed }).map((x) => x.id);
+
+    expect(order(1)).toEqual(order(1));
+    expect(order(1)).not.toEqual(order(2));
+    // No seed, no noise: equal scores fall back to the id tie-break.
+    expect(order()).toEqual(candidates.map((x) => x.id).sort((a, b) => a.localeCompare(b)));
   });
 
   it('puts posts older than two months behind recent ones, even from feeds not yet shown', () => {

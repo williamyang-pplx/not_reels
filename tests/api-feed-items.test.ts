@@ -6,13 +6,16 @@ beforeEach(() => {
   resetDb();
 });
 
-function insertItem(feedId: string, item: { guid: string; title: string; link: string; publishedAt: Date; sourceRank?: number | null }) {
+function insertItem(
+  feedId: string,
+  item: { id?: string; guid: string; title: string; link: string; publishedAt: Date; sourceRank?: number | null },
+) {
   getDb()
     .prepare(
       `INSERT INTO "FeedItem" ("id", "feedId", "guid", "title", "link", "publishedAt", "sourceRank", "fetchedAt")
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(cuid(), feedId, item.guid, item.title, item.link, item.publishedAt.getTime(), item.sourceRank ?? null, Date.now());
+    .run(item.id ?? cuid(), feedId, item.guid, item.title, item.link, item.publishedAt.getTime(), item.sourceRank ?? null, Date.now());
 }
 
 const GET = (qs = '') => request(`/api/feed-items${qs}`);
@@ -47,7 +50,9 @@ describe('GET /api/feed-items', () => {
 
   it('prioritizes popularity rank over recency in recommended mode', async () => {
     const feed = createFeed({ topic: 'TECHNOLOGY' });
+    // Fixed ids keep the Hot noise the same on every run.
     insertItem(feed.id, {
+      id: 'popular-older',
       guid: 'popular-older',
       title: 'Popular but older',
       link: 'https://example.com/popular-older',
@@ -55,6 +60,7 @@ describe('GET /api/feed-items', () => {
       sourceRank: 0,
     });
     insertItem(feed.id, {
+      id: 'fresh-lower-rank',
       guid: 'fresh-lower-rank',
       title: 'Fresh but lower rank',
       link: 'https://example.com/fresh-lower-rank',
@@ -91,8 +97,30 @@ describe('GET /api/feed-items', () => {
       sourceRank: 0,
     });
 
+    // Without the round-robin pool, the 350 newer busy items would push it past the 300 cut.
     const body = await (await GET('?sort=recommended')).json();
-    expect(body.data.items.map((i: { guid: string }) => i.guid).slice(0, 2)).toEqual(['busy-0', 'quiet-0']);
+    expect(body.data.items.map((i: { guid: string }) => i.guid)).toContain('quiet-0');
+  });
+
+  it('keeps the Hot order until a feed is stored, then reshuffles it', async () => {
+    const feeds = Array.from({ length: 20 }, (_, i) =>
+      createFeed({ name: `F${i}`, url: `https://example.com/${i}.xml`, topic: 'TECHNOLOGY', lastFetched: 1 }));
+    feeds.forEach((feed, i) =>
+      insertItem(feed.id, {
+        id: `item-${i}`,
+        guid: `g${i}`,
+        title: `T${i}`,
+        link: `https://example.com/item/${i}`,
+        publishedAt: new Date('2026-04-17T00:00:00Z'),
+        sourceRank: 0,
+      }));
+    const order = async () =>
+      ((await GET('?sort=recommended').then((r) => r.json())).data.items as { id: string }[]).map((i) => i.id);
+
+    const first = await order();
+    expect(await order()).toEqual(first);
+    getDb().prepare('UPDATE "Feed" SET "lastFetched" = 2 WHERE "id" = ?').run(feeds[0].id);
+    expect(await order()).not.toEqual(first);
   });
 
   it('returns a shuffled permutation of the window in random mode', async () => {

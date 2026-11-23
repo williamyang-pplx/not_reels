@@ -249,9 +249,9 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
   - The feed has topic `topic` if `topic` is given and is not `ALL` (validated).
 - **Exclusion:** load all `SavedLink.url` and `HiddenLink.url`. Add `link NOT IN (...)` **to the DB query**. Do not filter these out in memory.
 - **`recommended` (shown as "Hot"):**
-  1. Fetch up to 300 items **round-robin over feeds**: number each feed's items by `sourceRank asc, publishedAt desc` (`ROW_NUMBER() OVER (PARTITION BY feedId …)`), then order by that number, then `sourceRank asc, publishedAt desc`. Every feed's best item is in the pool before any feed's second, so a busy feed can't crowd out a quiet one.
-  2. Give each item a "primary topic": the first entry of its feed's topics. In practice that is the lowest slug alphabetically, because the join rows come back in PK order.
-  3. Run the recommender (§6). Pass `topicCounts` (the number of SavedLinks per topic). Set `applyTopicBalance = true` only when no topic filter is set or the filter is `ALL`.
+  1. Fetch up to 300 items **round-robin over feeds**: number each feed's items by `sourceRank asc, publishedAt desc, id asc` (`ROW_NUMBER() OVER (PARTITION BY feedId …)`), then order by that number, then `sourceRank asc, publishedAt desc, id asc`. Every feed's best item is in the pool before any feed's second, so a busy feed can't crowd out a quiet one. The `id` key makes the cut at 300 deterministic.
+  2. Give each item a "primary topic": the first entry of its feed's topics. In practice that is the lowest slug alphabetically, because the join rows come back in PK order. Give it a **bucket** too: `YOUTUBE` or `REDDIT` for those source kinds; for any other feed, the topic filter if one is set, else the primary topic.
+  3. Run the recommender (§6). Pass `topicCounts` (the number of SavedLinks per topic) and `seed`: the largest `lastFetched` of the active feeds, or 0. Any successful feed store changes it (a Refresh, a per-feed refresh, an added feed, a finished archive fill), so the order reshuffles then and stays the same across reloads. Bucket balance is on for every tab.
   4. Slice to `limit`. `nextCursor` is always `null`.
 - **`random`:** fetch the 300 most recent items (`publishedAt desc`), shuffle them with Fisher–Yates, slice to `limit`. `nextCursor` is always `null`.
 - **`new`:**
@@ -363,7 +363,7 @@ Make the fetcher, the local provider registry and the concurrency injectable thr
 
 ## 6. Recommendation ("Hot") algorithm (`lib/recommendation.ts`)
 
-This is a pure function, `recommendItems(items, opts)`. Each item has `{id, feedId, publishedAt, sourceRank?, feed: {name, topic}}`.
+This is a pure function, `recommendItems(items, opts)`. Each item has `{id, feedId, publishedAt, sourceRank?, bucket, feed: {name, topic}}`. With the same items, options and `seed`, it returns the same order.
 
 - If there are 1 or fewer items, return them as they are.
 - **Weights** (overridable): popularity 0.6, recency 0.15, topicAffinity 0.15. (There is no feed-volume term: a feed that posts more must not rank higher for it.)
@@ -373,14 +373,15 @@ This is a pure function, `recommendItems(items, opts)`. Each item has `{id, feed
   - If the total is 0, every topic gets 0.5.
   - Otherwise use the Laplace-smoothed share `(count+1)/(total + #uniqueTopicsInItems)`.
 - **staleness:** 0 for a post from the last 60 days. After that, `1 − exp(−ln2/30 × (ageDays − 60))`, so it is 0.5 at 90 days and nears 1 by about 6 months.
-- **baseScore:** the weighted sum of the three scores, minus `0.5 × staleness`. The penalty is larger than anything feed spread or topic balance can make up, so a post older than two months sits behind the recent ones but stays in the list.
+- **noise** (only if `seed` is given): `0.07 × G`, where G = −ln(−ln u) and u comes from the FNV-1a hash (finished with murmur3's fmix32) of `"<seed>:<id>"`, mapped into (0, 1). It is drawn once per item, so a save or hide only removes that card.
+- **baseScore:** the weighted sum of the three scores, minus `0.5 × staleness`, plus the noise. The penalty is larger than anything feed spread or bucket balance can make up, and the noise makes it up only rarely, so a post older than two months sits behind the recent ones but stays in the list.
 - **Tie-break (`compareItems`):** `sourceRank asc` (null counts as +∞), then `publishedAt desc`, then `id` ascending.
 - **Diversified order.** Greedy selection, one position at a time. For each remaining candidate:
   - **Feed spread** (always on): `adjusted = baseScore − 0.2 × (items already placed from this feed)`. The front of the list cycles through sources before any feed repeats.
-  - **Topic balance** (only if `applyTopicBalance`, i.e. no topic filter): strength `1`, targetBlend `0.3`.
-    - `observed[t]` is topic t's share of the candidates. `uniform` is `1/#topics`.
-    - `target[t] = 0.3×observed[t] + 0.7×uniform`, so a topic with few feeds still gets close to an equal share of the front.
-    - `projectedShare = (selectedCount[t]+1)/position`. Subtract `1 × max(0, projectedShare − target[t])`.
+  - **Bucket balance** (unless `applyBucketBalance = false`; a topic filter does not turn it off): strength `1`, targetBlend `0.3`.
+    - `observed[b]` is bucket b's share of the candidates. `uniform` is `1/#buckets`.
+    - `target[b] = 0.3×observed[b] + 0.7×uniform`, so a bucket with few feeds (one RSS topic next to many YouTube channels) still gets close to an equal share of the front.
+    - `projectedShare = (selectedCount[b]+1)/position`. Subtract `1 × max(0, projectedShare − target[b])`.
   - Pick the highest `adjusted`. Ties go to the earlier item under `compareItems`.
 
 ## 7. Embeds and URL helpers
@@ -645,7 +646,7 @@ Write Vitest suites with the same coverage as these existing files:
 - `embed`: YouTube and Reddit detection and ID extraction edge cases.
 - `archive`: `cleanUrl` removes the query and fragment and keeps the path.
 - `rss-fetcher`: the normalization fallbacks and guid hashing.
-- `recommendation`: the scoring order, the feed spread (every feed once before a repeat), the topic-balance effect (a small, slow topic gets a front slot), and the deterministic tie-breaks.
+- `recommendation`: the scoring order, the feed spread (every feed once before a repeat), the bucket-balance effect (a small, slow topic gets a front slot, and so does a lone RSS topic among many YouTube channels), seeded noise (same seed, same order; no seed, no noise), and the deterministic tie-breaks.
 - `feed-refresh`:
   - Inserts and dedupes.
   - Overwrites on update.
@@ -673,7 +674,7 @@ Write Vitest suites with the same coverage as these existing files:
 
 ## 13. Known quirks (copy them as they are unless told otherwise)
 - The confirm text for deleting a topic says it "will also delete all feeds". In fact the server **refuses** with 409 if any feed would be left with no topic. It deletes only saved links that have that topic.
-- The "primary topic" of an item (used for Save, the border color, the badge and topic balance) is the first FeedTopic row, which means the lowest slug alphabetically. It is not the first topic the user selected.
+- The "primary topic" of an item (used for Save, the border color, the badge and, for feeds that are not YouTube or Reddit, the Hot bucket) is the first FeedTopic row, which means the lowest slug alphabetically. It is not the first topic the user selected.
 - Hot and Shuffle never page (`nextCursor: null`); they show the whole list, up to 300 items.
 - Feed-row Refresh on Manage does not invalidate any query. The UI does not show the result.
 - Hiding an item does not invalidate `['saved-links']`. Saving invalidates both.
