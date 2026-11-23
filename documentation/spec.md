@@ -166,7 +166,9 @@ model YouTubeChannel {                 // §7.2: a channel's one-time back catal
 | `PAGE_SIZE_DEFAULT` / `PAGE_SIZE_MAX` | 50 / 100 |
 | `RELEVANT_FETCH_SIZE` | 200 (candidate pool for Hot and Random) |
 | `MAX_ITEMS_PER_FEED` | 30 |
-| `YOUTUBE_ARCHIVE_PICKS` | 30 (archive picks per YOUTUBE refresh, §7.2) |
+| `YOUTUBE_FEED_ITEMS` | 15 (posts per YOUTUBE refresh, §7.2) |
+| `YOUTUBE_RECENT_MAX` | 4 (recent RSS posts per YOUTUBE refresh with Archive on) |
+| `YOUTUBE_RECENT_DAYS` | 30 (a recent post's upload date is at most this many days old) |
 | `YOUTUBE_FILL_MAX_PAGES` | 400 (playlistItems pages a channel fill reads per playlist, §7.2) |
 | `FETCH_CONCURRENCY` | 12 |
 
@@ -291,7 +293,7 @@ Make the fetcher, the local provider registry and the concurrency injectable thr
    - For each item, upsert on `(feedId, guid)`. On create, set all fields. On update, overwrite title, link, summary, author, publishedAt and sourceRank. Count only the rows that are actually new.
    - Then set `sourceRank = 10000` on every item in this feed whose guid was **not** in this fetch. These are "stale" items.
 4. Set `lastFetched = now` and `fetchErrorCount = 0`.
-5. **Prune:** keep the top N items ordered by `sourceRank asc, publishedAt desc` and delete the rest. N is **30** for every feed (`MAX_ITEMS_PER_FEED`; for `local/rym_music_recs` it is `RYM_ITEMS_PER_REFRESH`, one batch, also 30). A YOUTUBE feed keeps exactly this refresh's batch (up to 15 + 30), and its videos' `lastShownAt` is set in the same transaction.
+5. **Prune:** keep the top N items ordered by `sourceRank asc, publishedAt desc` and delete the rest. N is **30** for every feed (`MAX_ITEMS_PER_FEED`; for `local/rym_music_recs` it is `RYM_ITEMS_PER_REFRESH`, one batch, also 30). A YOUTUBE feed keeps exactly this refresh's batch (at most 15), and its videos' `lastShownAt` is set in the same transaction.
 6. Return `{newItems, ok:true}`.
 7. **If any step throws:** increment `fetchErrorCount`. The feed stays active; only the user pauses feeds. Log `[feed-refresh] failed feed=<id> url=<url>:` and the error. Return `{newItems:0, ok:false}`.
 
@@ -423,7 +425,8 @@ A YouTube channel feed (`sourceKind = YOUTUBE`) has two sources, each switched o
 - **URLs:** on a YouTube host, `/@<handle>` (with `/videos`, `/featured`, … after it), `/channel/UC…` and `/feeds/videos.xml?channel_id=UC…` are channel URLs. Each is stored as `https://www.youtube.com/channel/UC…`, so a channel is one feed (409 on a second). A handle costs one `channels.list?forHandle=@<handle>` call (1 quota unit) when the feed is added or its URL edited.
 - **Settings:** Recent and Archive (default on; not both off), Include Shorts (default off), and an optional date range (UTC days, end day included; stored as `publishedAfter` inclusive and `publishedBefore` exclusive, in ms) that filters archive picks only.
 - **Recent:** `GET https://www.youtube.com/feeds/videos.xml?channel_id=<id>`, the channel's 15 newest uploads. A `/shorts/<id>` link marks a Short; Shorts are dropped from the posts unless Shorts are on. Every RSS video, Shorts included, is saved to `YouTubeVideo` with `INSERT OR IGNORE`. Recent posts keep their RSS date as `publishedAt`.
-- **Archive:** each refresh picks `YOUTUBE_ARCHIVE_PICKS` (30) of the channel's `YouTubeVideo` rows inside the range, Shorts only when on, none of this refresh's recent videos: never-shown first, then the least recently shown, random among equals. An archive post's `publishedAt` is the refresh time, so a new batch counts as new, and a re-picked video is new again.
+- **Counts:** a refresh makes at most `YOUTUBE_FEED_ITEMS` (15) posts. With both sources on: the newest `YOUTUBE_RECENT_MAX` (4) RSS videos uploaded in the last `YOUTUBE_RECENT_DAYS` (30) days, then archive picks for the rest (11 with 4 recent, 12 with 3, 15 with none), then the other RSS videos, newest first, if the archive has too few. Recent only: up to 15 RSS videos of any age. Archive only: 15 picks.
+- **Archive:** each refresh picks its share (Counts) of the channel's `YouTubeVideo` rows inside the range, Shorts only when on, none of the videos in this refresh's RSS feed: never-shown first, then the least recently shown, random among equals. An archive post's `publishedAt` is the refresh time, so a new batch counts as new, and a re-picked video is new again.
 - **Posts:** recent videos and picks interleave (recent, pick, recent, pick, …; `sourceRank` = position), so picks reach the Hot pool. Each post has `guid` = `link` = `https://www.youtube.com/watch?v=<id>` (what the RSS path stored, since YouTube's Atom entries have no `<guid>`), the title, the cleaned description (§5.4, at most 1,000 characters) as `summary`, the channel as `author`, and the upload date as `uploadedAt`. The batch replaces the previous one, and its videos' `lastShownAt` is set once it is stored.
 - **Fill:** a refresh with Archive on starts the channel's fill unless it is filled or running, without waiting for it (the one detached promise in the app). The fill pages the uploads playlist (`UU…`) and the Shorts playlist (`UUSH…`, to tag Shorts; a 404 `playlistNotFound` is an empty list) with `playlistItems.list` (50 a page, 1 unit each, at most `YOUTUBE_FILL_MAX_PAGES` = 400 pages per playlist), saves every video (a Short's tag from `UUSH` overrides an RSS row's), sets `YouTubeChannel.filledAt` (also when a playlist was cut at the cap) and then refreshes the feed. A failure stores its reason in `fillError`, is logged once as `[youtube] fill failed channel=<id>: <reason>`, and leaves the channel unfilled, so the next refresh tries again. Errors are `YouTube API <status> <reason>` and never hold a request URL, which carries the key.
 - **Quota:** a fill is about 1 unit per 50 videos, once per channel (~25 for 1,000 videos). Refreshes cost 0. A fill that keeps failing costs about 1 unit per refresh. Daily limit: 10,000 units.

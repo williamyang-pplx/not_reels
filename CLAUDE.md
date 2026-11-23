@@ -41,8 +41,8 @@ The design is in `documentation/low_level_plan.md` and `documentation/framework_
 - **YouTube:** one feed per channel (sourceKind YOUTUBE, stored as `https://www.youtube.com/channel/UC…`) with two
   sources: its RSS feed (Recent, 15 newest; Shorts are `/shorts/` links) and an archive, the `YouTubeVideo` table
   (`src/lib/youtube-archive.ts`), which every RSS video joins and which a one-time background fill per channel pages
-  through the Data API (`src/lib/youtube-api.ts`). Each refresh picks 30 never-shown-first archive videos and replaces
-  the last batch; refresh never calls the API. `YOUTUBE_API_KEY` (a Fly secret) is used for handle lookups and fills
+  through the Data API (`src/lib/youtube-api.ts`). Each refresh makes at most 15 posts, replacing the last batch: up
+  to 4 RSS videos from the past 30 days and never-shown-first archive picks for the rest; refresh never calls the API. `YOUTUBE_API_KEY` (a Fly secret) is used for handle lookups and fills
   only. Never put a request URL in an error or log: it carries the key. See spec §7.2.
 
 ## Conventions

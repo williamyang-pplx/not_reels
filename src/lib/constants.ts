@@ -21,8 +21,13 @@ export const RANKED_LIST_SIZE = 300; // Hot and Shuffle: posts ranked or shuffle
 
 export const MAX_ITEMS_PER_FEED = 30;
 
-/** Archive picks per YOUTUBE refresh; recent RSS videos (at most 15) come on top. */
-export const YOUTUBE_ARCHIVE_PICKS = 30;
+/**
+ * Posts per YOUTUBE refresh (both sources on): up to YOUTUBE_RECENT_MAX RSS videos uploaded in the last
+ * YOUTUBE_RECENT_DAYS, archive picks for the rest. Recent only: up to 15 RSS videos; archive only: 15 picks.
+ */
+export const YOUTUBE_FEED_ITEMS = 15;
+export const YOUTUBE_RECENT_MAX = 4;
+export const YOUTUBE_RECENT_DAYS = 30;
 /** Most playlistItems pages (50 videos, 1 quota unit each) one channel fill reads per playlist: 20,000 videos. */
 export const YOUTUBE_FILL_MAX_PAGES = 400;
 

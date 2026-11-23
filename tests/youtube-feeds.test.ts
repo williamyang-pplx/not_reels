@@ -103,12 +103,12 @@ describe('fetchYouTubeFeedItems', () => {
     expect(items).toHaveLength(3);
   });
 
-  it('picks archive videos only, dated now with their upload date, without reading RSS', async () => {
+  it('picks 15 archive videos only, dated now with their upload date, without reading RSS', async () => {
     await seedVideos(CHANNEL_ID, 40);
     const { fetcher, urls } = rssFetcher(recent);
     const items = await fetchYouTubeFeedItems(CHANNEL_ID, { ...BOTH, recent: false }, fetcher, NOW);
     expect(urls).toEqual([]);
-    expect(items).toHaveLength(30);
+    expect(items).toHaveLength(15);
     expect(items.every((i) => i.publishedAt.getTime() === NOW.getTime())).toBe(true);
     expect(items.every((i) => i.uploadedAt!.getTime() < day('2016-01-01'))).toBe(true);
   });
@@ -117,10 +117,53 @@ describe('fetchYouTubeFeedItems', () => {
     await seedVideos(CHANNEL_ID, 40);
     const { fetcher } = rssFetcher(recent);
     const items = await fetchYouTubeFeedItems(CHANNEL_ID, BOTH, fetcher, NOW);
-    expect(items).toHaveLength(32);
+    expect(items).toHaveLength(15);
     expect(items.slice(0, 4).map((i) => i.link.slice(-11, -10))).toEqual(['r', 'a', 'r', 'a']);
     expect(items.map((i) => i.sourceRank)).toEqual(items.map((_, i) => i));
     expect(new Set(items.map((i) => i.guid)).size).toBe(items.length);
+  });
+});
+
+describe('fetchYouTubeFeedItems: 15 posts, up to 4 of them recent', () => {
+  /** RSS videos `days` days before NOW (newest first), ids r0000000000, r0000000001, … */
+  const daysAgo = (...days: number[]) =>
+    days.map((d, i) => rssItem(`r${String(i).padStart(10, '0')}`, new Date(NOW.getTime() - d * 86_400_000).toISOString()));
+  const recentIds = (items: { link: string; publishedAt: Date }[]) =>
+    items.filter((i) => i.publishedAt.getTime() !== NOW.getTime()).map((i) => i.link.slice(-11));
+
+  it('takes the 4 newest videos from the past 30 days and 11 archive picks, none of them from the RSS feed', async () => {
+    await seedVideos(CHANNEL_ID, 40);
+    const { fetcher } = rssFetcher(daysAgo(1, 2, 3, 4, 5, 6, 40, 50));
+    const items = await fetchYouTubeFeedItems(CHANNEL_ID, BOTH, fetcher, NOW);
+    expect(items).toHaveLength(15);
+    expect(recentIds(items)).toEqual(['r0000000000', 'r0000000001', 'r0000000002', 'r0000000003']);
+    expect(items.filter((i) => i.link.slice(-11, -10) === 'r')).toHaveLength(4);
+  });
+
+  it('gives the archive more posts when fewer videos are from the past month', async () => {
+    await seedVideos(CHANNEL_ID, 40);
+    const { fetcher } = rssFetcher(daysAgo(10, 20, 29, 31, 60));
+    const items = await fetchYouTubeFeedItems(CHANNEL_ID, BOTH, fetcher, NOW);
+    expect(recentIds(items)).toEqual(['r0000000000', 'r0000000001', 'r0000000002']);
+    expect(items).toHaveLength(15);
+    const none = await fetchYouTubeFeedItems(CHANNEL_ID, BOTH, rssFetcher(daysAgo(40, 50)).fetcher, NOW);
+    expect(recentIds(none)).toEqual([]);
+    expect(none).toHaveLength(15);
+  });
+
+  it('tops up with older RSS videos when the archive runs short', async () => {
+    await seedVideos(CHANNEL_ID, 3);
+    const { fetcher } = rssFetcher(daysAgo(1, 2, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150));
+    const items = await fetchYouTubeFeedItems(CHANNEL_ID, BOTH, fetcher, NOW);
+    expect(items).toHaveLength(15);
+    expect(recentIds(items)).toHaveLength(12);
+    expect(items.filter((i) => i.publishedAt.getTime() === NOW.getTime())).toHaveLength(3);
+  });
+
+  it('with Archive off, shows up to 15 RSS videos of any age', async () => {
+    const { fetcher } = rssFetcher(daysAgo(1, 40, 400));
+    const items = await fetchYouTubeFeedItems(CHANNEL_ID, { ...BOTH, archive: false }, fetcher, NOW);
+    expect(recentIds(items)).toEqual(['r0000000000', 'r0000000001', 'r0000000002']);
   });
 });
 

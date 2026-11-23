@@ -265,8 +265,9 @@ describe('refreshSingleFeed', () => {
 });
 
 describe('refreshSingleFeed (YOUTUBE)', () => {
+  // Daily uploads from two days ago back: the first four are from the past month whenever the tests run.
   const recent = Array.from({ length: 15 }, (_, i) =>
-    rssItem(`r${String(i).padStart(10, '0')}`, new Date(Date.parse('2026-11-21T00:00:00Z') - i * 86_400_000).toISOString()),
+    rssItem(`r${String(i).padStart(10, '0')}`, new Date(Date.now() - (i + 2) * 86_400_000).toISOString()),
   );
   const rss = async (): Promise<ParsedFeed> => ({ items: recent });
   // A filled channel: no fill starts, so these cases need no API stub.
@@ -287,9 +288,9 @@ describe('refreshSingleFeed (YOUTUBE)', () => {
     filled();
     await seedVideos(CHANNEL_ID, 40);
     const feed = youTubeFeed();
-    expect(await refreshSingleFeed(feed.id, { fetcher: rss })).toEqual({ newItems: 45, ok: true });
+    expect(await refreshSingleFeed(feed.id, { fetcher: rss })).toEqual({ newItems: 15, ok: true });
     const stored = itemsOf(feed.id);
-    expect(stored).toHaveLength(45);
+    expect(stored).toHaveLength(15);
     expect(stored.slice(0, 2).map((i) => i.link.slice(-11, -10))).toEqual(['r', 'a']);
   });
 
@@ -301,7 +302,7 @@ describe('refreshSingleFeed (YOUTUBE)', () => {
     const first = new Set(itemsOf(feed.id).map((i) => i.guid));
     await refreshSingleFeed(feed.id, { fetcher: rss });
     const second = itemsOf(feed.id).map((i) => i.guid);
-    expect(second).toHaveLength(30);
+    expect(second).toHaveLength(15);
     expect(second.some((g) => first.has(g))).toBe(false);
   });
 

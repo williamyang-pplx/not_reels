@@ -1,4 +1,4 @@
-import { YOUTUBE_ARCHIVE_PICKS } from './constants';
+import { YOUTUBE_FEED_ITEMS, YOUTUBE_RECENT_DAYS, YOUTUBE_RECENT_MAX } from './constants';
 import { extractYouTubeId } from './embed';
 import type { FeedFetcher, NormalizedItem, RawRssItem } from './rss-fetcher';
 import type { YouTubeFeedOptions, YouTubeSettings } from './types';
@@ -57,11 +57,13 @@ function toItem(video: YouTubeVideoRow, publishedAt: Date, rank: number): Normal
 }
 
 /**
- * One YOUTUBE refresh: the recent RSS videos (Shorts only when on), all saved to the archive table, and the archive
- * picks (never-shown first, inside the date range, none of the recent ones). Recent posts keep their RSS date; an
- * archive post is dated `now`, so a re-picked video counts as new again. Posts are interleaved (recent, pick,
- * recent, pick, …) so archive picks reach the Hot pool, which takes each feed's best ranks first. Nothing is marked
- * shown here: storeItems does that once the posts are stored.
+ * One YOUTUBE refresh, at most YOUTUBE_FEED_ITEMS (15) posts. The RSS videos (Shorts only when on) are all saved to
+ * the archive table. With both sources on: the newest YOUTUBE_RECENT_MAX (4) RSS videos uploaded in the last
+ * YOUTUBE_RECENT_DAYS (30), then archive picks for the rest (never-shown first, inside the date range, none of this
+ * RSS feed's videos), then older RSS videos if the archive runs short. Recent only: up to 15 RSS videos; archive
+ * only: 15 picks. Recent posts keep their RSS date; an archive post is dated `now`, so a re-picked video counts as
+ * new again. Posts are interleaved (recent, pick, recent, pick, …) so archive picks reach the Hot pool, which takes
+ * each feed's best ranks first. Nothing is marked shown here: storeItems does that once the posts are stored.
  */
 export async function fetchYouTubeFeedItems(
   channelId: string,
@@ -69,21 +71,29 @@ export async function fetchYouTubeFeedItems(
   fetcher: FeedFetcher,
   now: Date,
 ): Promise<NormalizedItem[]> {
-  let recent: YouTubeVideoRow[] = [];
+  let rss: YouTubeVideoRow[] = [];
   if (options.recent) {
     const parsed = await fetcher(youTubeRssUrl(channelId));
-    const videos = rssVideos(parsed.items, channelId);
-    saveYouTubeVideos(videos);
-    recent = videos.filter((v) => options.includeShorts || !v.isShort);
+    rss = rssVideos(parsed.items, channelId);
+    saveYouTubeVideos(rss);
   }
-  const picks = options.archive
-    ? pickArchiveVideos(
-        channelId,
-        options,
-        recent.map((v) => v.videoId),
-        YOUTUBE_ARCHIVE_PICKS,
-      )
-    : [];
+  const shown = rss.filter((v) => options.includeShorts || !v.isShort).sort((a, b) => b.uploadedAt - a.uploadedAt);
+  if (!options.archive) return interleave(shown.slice(0, YOUTUBE_FEED_ITEMS), [], now);
+  const monthAgo = now.getTime() - YOUTUBE_RECENT_DAYS * DAY_MS;
+  const recent = shown.filter((v) => v.uploadedAt >= monthAgo).slice(0, YOUTUBE_RECENT_MAX);
+  const picks = pickArchiveVideos(
+    channelId,
+    options,
+    rss.map((v) => v.videoId),
+    YOUTUBE_FEED_ITEMS - recent.length,
+  );
+  const spare = YOUTUBE_FEED_ITEMS - recent.length - picks.length;
+  const rest = shown.filter((v) => !recent.includes(v)).slice(0, spare);
+  return interleave([...recent, ...rest], picks, now);
+}
+
+/** Recent videos (their RSS date) and archive picks (dated `now`) as posts: recent, pick, recent, pick, … */
+function interleave(recent: YouTubeVideoRow[], picks: YouTubeVideoRow[], now: Date): NormalizedItem[] {
   const items: NormalizedItem[] = [];
   for (let i = 0; i < Math.max(recent.length, picks.length); i += 1) {
     if (i < recent.length) items.push(toItem(recent[i], new Date(recent[i].uploadedAt), items.length));
