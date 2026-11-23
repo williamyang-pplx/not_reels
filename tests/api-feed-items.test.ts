@@ -123,6 +123,34 @@ describe('GET /api/feed-items', () => {
     expect(await order()).not.toEqual(first);
   });
 
+  it('shuffles the Hot pool, with a fresh order on each request', async () => {
+    const busy = createFeed({ name: 'Busy', topic: 'TECHNOLOGY' });
+    const quiet = createFeed({ name: 'Quiet', topic: 'TECHNOLOGY', url: 'https://example.com/quiet.xml' });
+    for (let i = 0; i < 350; i++) {
+      insertItem(busy.id, {
+        guid: `busy-${i}`,
+        title: `Busy ${i}`,
+        link: `https://example.com/busy/${i}`,
+        publishedAt: new Date(Date.UTC(2026, 3, 17) - i * 60_000),
+        sourceRank: 0,
+      });
+    }
+    insertItem(quiet.id, {
+      guid: 'quiet-0',
+      title: 'Quiet',
+      link: 'https://example.com/quiet/0',
+      publishedAt: new Date('2026-03-01T00:00:00Z'),
+      sourceRank: 0,
+    });
+    const order = async () =>
+      ((await GET('?sort=random').then((r) => r.json())).data.items as { guid: string }[]).map((i) => i.guid);
+
+    // The round-robin pool keeps the quiet feed's post, which 300 newest-first would cut.
+    const first = await order();
+    expect(first).toContain('quiet-0');
+    expect(await order()).not.toEqual(first);
+  });
+
   it('returns a shuffled permutation of the window in random mode', async () => {
     const feed = createFeed();
     seedItems(feed.id, 10);

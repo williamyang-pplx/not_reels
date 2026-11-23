@@ -10,7 +10,7 @@ not-reels is a personal RSS aggregator for one user. There are no accounts and n
 
 - The user registers **feeds**. Each feed has one or more user-defined **topics**. There are no feed types: every feed goes into the same stream.
 - A feed is either a remote **RSS/Atom** URL or a **local provider** (`local/<provider_id>`). The only local provider is `rym_music_recs`, which samples album recommendations from a bundled SQLite DB.
-- The main page shows one stream of feed items from every active feed, filtered by topic. It has two sort modes, Hot and New, and a Shuffle button that shows the items in random order.
+- The main page shows one stream of feed items from every active feed, filtered by topic. It has two sort modes, Hot and New, and a Shuffle button that shows a fresh, more random Hot order on each tap.
 - The user can **Save** an item, which moves it to the Saved list, or **Hide** it, which removes it permanently. Saved and hidden URLs never show in the main stream.
 - The user can also add saved links by hand.
 - Refresh is **manual only**. There is no cron or scheduler.
@@ -166,6 +166,7 @@ model YouTubeChannel {                 // §7.2: a channel's one-time back catal
 | `DEFAULT_TOPICS` | NEWS/News, MUSIC/Music, LITERATURE/Literature, TECHNOLOGY/Tech, SCIENCE/Science, CULTURE/Culture, POLITICS/Politics, OTHER/Other (in this order) |
 | `PAGE_SIZE_DEFAULT` / `PAGE_SIZE_MAX` | 50 / 100 |
 | `RELEVANT_FETCH_SIZE` | 200 (candidate pool for Hot and Random) |
+| `SHUFFLE_NOISE_SCALE` | 0.15 (Shuffle's noise scale; Hot uses the recommender's default, 0.07) |
 | `MAX_ITEMS_PER_FEED` | 30 |
 | `YOUTUBE_FEED_ITEMS` | 15 (posts per YOUTUBE refresh, §7.2) |
 | `YOUTUBE_RECENT_MAX` | 4 (recent RSS posts per YOUTUBE refresh with Archive on) |
@@ -253,7 +254,7 @@ Build shared helpers `ok(data, status)`, `fail(message, code, status)`, `parseJs
   2. Give each item a "primary topic": the first entry of its feed's topics. In practice that is the lowest slug alphabetically, because the join rows come back in PK order. Give it a **bucket** too: `YOUTUBE` or `REDDIT` for those source kinds; for any other feed, the topic filter if one is set, else the primary topic.
   3. Run the recommender (§6). Pass `topicCounts` (the number of SavedLinks per topic) and `seed`: the largest `lastFetched` of the active feeds, or 0. Any successful feed store changes it (a Refresh, a per-feed refresh, an added feed, a finished archive fill), so the order reshuffles then and stays the same across reloads. Bucket balance is on for every tab.
   4. Slice to `limit`. `nextCursor` is always `null`.
-- **`random`:** fetch the 300 most recent items (`publishedAt desc`), shuffle them with Fisher–Yates, slice to `limit`. `nextCursor` is always `null`.
+- **`random` (shown as "Shuffle"):** the same as `recommended` (same pool, buckets and recommender), except that `seed` is a new random 32-bit integer on every request and `noiseScale` is `SHUFFLE_NOISE_SCALE` (0.15). Each tap is a fresh Hot order: about 7 of two taps' top 30 match, while strong and recent posts still lean toward the top. `nextCursor` is always `null`.
 - **`new`:**
   - If `cursor` is given (ISO datetime; invalid gives 400 `"Invalid cursor"`), add `publishedAt < cursor`.
   - Fetch `limit+1` items ordered by `publishedAt desc`.
@@ -373,7 +374,7 @@ This is a pure function, `recommendItems(items, opts)`. Each item has `{id, feed
   - If the total is 0, every topic gets 0.5.
   - Otherwise use the Laplace-smoothed share `(count+1)/(total + #uniqueTopicsInItems)`.
 - **staleness:** 0 for a post from the last 60 days. After that, `1 − exp(−ln2/30 × (ageDays − 60))`, so it is 0.5 at 90 days and nears 1 by about 6 months.
-- **noise** (only if `seed` is given): `0.07 × G`, where G = −ln(−ln u) and u comes from the FNV-1a hash (finished with murmur3's fmix32) of `"<seed>:<id>"`, mapped into (0, 1). It is drawn once per item, so a save or hide only removes that card.
+- **noise** (only if `seed` is given): `noiseScale × G` (`noiseScale` defaults to 0.07), where G = −ln(−ln u) and u comes from the FNV-1a hash (finished with murmur3's fmix32) of `"<seed>:<id>"`, mapped into (0, 1). It is drawn once per item, so a save or hide only removes that card.
 - **baseScore:** the weighted sum of the three scores, minus `0.5 × staleness`, plus the noise. The penalty is larger than anything feed spread or bucket balance can make up, and the noise makes it up only rarely, so a post older than two months sits behind the recent ones but stays in the list.
 - **Tie-break (`compareItems`):** `sourceRank asc` (null counts as +∞), then `publishedAt desc`, then `id` ascending.
 - **Diversified order.** Greedy selection, one position at a time. For each remaining candidate:

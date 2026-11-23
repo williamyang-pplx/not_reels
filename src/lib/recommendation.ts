@@ -32,6 +32,8 @@ export interface RecommendOptions {
   applyBucketBalance?: boolean;
   /** Seeds the per-item noise; without it there is no noise. */
   seed?: number;
+  /** How much the noise moves each score (default 0.07). */
+  noiseScale?: number;
 }
 
 interface ScoredItem<T extends RecommendationItem> {
@@ -54,7 +56,7 @@ const DEFAULT_TARGET_BLEND = 0.3;
 const STALE_AFTER_DAYS = 60;
 const STALE_HALF_LIFE_DAYS = 30;
 const DEFAULT_STALE_PENALTY = 0.5;
-const NOISE_SCALE = 0.07; // noise sd ≈ 0.09, about the popularity gap between rank 0 and rank 1
+const DEFAULT_NOISE_SCALE = 0.07; // noise sd ≈ 0.09, about the popularity gap between rank 0 and rank 1
 
 function ageHours(publishedAt: Date, now: Date): number {
   return Math.max(0, (now.getTime() - publishedAt.getTime()) / 3_600_000);
@@ -207,6 +209,7 @@ export function recommendItems<T extends RecommendationItem>(
   const topicCounts = options.topicCounts ?? {};
   const applyBucketBalance = options.applyBucketBalance ?? true;
   const { seed } = options;
+  const noiseScale = options.noiseScale ?? DEFAULT_NOISE_SCALE;
   const stalePenalty = options.stalePenalty ?? DEFAULT_STALE_PENALTY;
 
   const topicAffinity = topicAffinityByTopic(topicCounts, items.map((item) => item.feed.topic));
@@ -218,7 +221,7 @@ export function recommendItems<T extends RecommendationItem>(
       + (weights.recency * recencyScore(item, now))
       + (weights.topicAffinity * (topicAffinity[item.feed.topic] ?? DEFAULT_TOPIC_AFFINITY))
       - (stalePenalty * staleness(item, now))
-      + (seed === undefined ? 0 : NOISE_SCALE * gumbel(seed, item.id)),
+      + (seed === undefined ? 0 : noiseScale * gumbel(seed, item.id)),
   }));
 
   return diversify(

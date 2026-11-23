@@ -17,7 +17,9 @@ export const DEFAULT_TOPICS: { slug: string; label: string }[] = [
 
 export const PAGE_SIZE_DEFAULT = 50; // New: cards per page; fewer cards (and images) on the first paint
 export const PAGE_SIZE_MAX = 100;
-export const RANKED_LIST_SIZE = 300; // Hot and Shuffle: posts ranked or shuffled and shown, all on one page
+export const RANKED_LIST_SIZE = 300; // Hot and Shuffle: posts ranked and shown, all on one page
+/** Shuffle is Hot with a fresh seed and this noise scale (Hot's is 0.07): about 7 of two taps' top 30 match. */
+export const SHUFFLE_NOISE_SCALE = 0.15;
 
 export const MAX_ITEMS_PER_FEED = 30;
 

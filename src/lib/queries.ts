@@ -1,5 +1,5 @@
 import { getDb, bool, toDate } from '../db';
-import { RANKED_LIST_SIZE } from './constants';
+import { RANKED_LIST_SIZE, SHUFFLE_NOISE_SCALE } from './constants';
 import { recommendItems } from './recommendation';
 import { parseYouTubeFeedUrl } from './youtube-api';
 import { archiveInfo, type ArchiveInfo } from './youtube-archive';
@@ -160,18 +160,9 @@ function mapItem(row: ItemRow, topics: string[]): FeedItemDTO {
   };
 }
 
-function shuffle<T>(items: T[]): T[] {
-  const result = [...items];
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [result[i], result[j]] = [result[j], result[i]];
-  }
-  return result;
-}
-
 /**
  * The feed stream (spec §4.4). Saved and hidden URLs are excluded inside the SQL query.
- * Hot ("recommended") and Random never page; New pages on publishedAt.
+ * Hot ("recommended") and Shuffle ("random", Hot with a fresh seed and more noise) never page; New pages on publishedAt.
  */
 export function listFeedItems(q: FeedItemsQuery): { items: FeedItemDTO[]; nextCursor: string | null } {
   const db = getDb();
@@ -194,7 +185,8 @@ export function listFeedItems(q: FeedItemsQuery): { items: FeedItemDTO[]; nextCu
   const from = `FROM "FeedItem" i JOIN "Feed" f ON f."id" = i."feedId" WHERE ${where.join(' AND ')}`;
   let sql: string;
   let take: number;
-  if (q.sort === 'recommended') {
+  const ranked = q.sort === 'recommended' || q.sort === 'random';
+  if (ranked) {
     // Round-robin over feeds (each feed's best item, then each one's second, ...), so a feed that posts a lot
     // can't crowd the others out of the pool.
     sql = `SELECT * FROM (
@@ -205,9 +197,6 @@ export function listFeedItems(q: FeedItemsQuery): { items: FeedItemDTO[]; nextCu
              ${from}
            ) ORDER BY feedRank ASC, "sourceRank" ASC, "publishedAt" DESC, "id" ASC LIMIT ?`;
     take = RANKED_LIST_SIZE;
-  } else if (q.sort === 'random') {
-    sql = `SELECT ${ITEM_COLUMNS} ${from} ORDER BY i."publishedAt" DESC LIMIT ?`;
-    take = RANKED_LIST_SIZE;
   } else {
     sql = `SELECT ${ITEM_COLUMNS} ${from} ORDER BY i."publishedAt" DESC LIMIT ?`;
     take = q.limit + 1;
@@ -217,15 +206,17 @@ export function listFeedItems(q: FeedItemsQuery): { items: FeedItemDTO[]; nextCu
   const topics = topicsByFeed(rows.map((r) => r.feedId));
   const topicsOf = (r: ItemRow) => topics.get(r.feedId) ?? [];
 
-  if (q.sort === 'recommended') {
+  if (ranked) {
     const counts = db
       .prepare('SELECT "topic", COUNT(*) AS n FROM "SavedLink" GROUP BY "topic"')
       .all() as { topic: string; n: number }[];
     const topicCounts = Object.fromEntries(counts.map((c) => [c.topic, c.n]));
-    // Any successful feed store moves this, so the order reshuffles then and stays put across reloads.
-    const { seed } = db.prepare('SELECT MAX("lastFetched") AS seed FROM "Feed" WHERE "isActive" = 1').get() as {
-      seed: number | null;
+    // Hot: any successful feed store moves the seed, so the order reshuffles then and stays put across reloads.
+    // Shuffle: a fresh seed on every request.
+    const lastStore = db.prepare('SELECT MAX("lastFetched") AS ms FROM "Feed" WHERE "isActive" = 1').get() as {
+      ms: number | null;
     };
+    const seed = q.sort === 'random' ? Math.floor(Math.random() * 2 ** 32) : lastStore.ms ?? 0;
     const candidates = rows.map((r) => ({
       id: r.id,
       feedId: r.feedId,
@@ -238,12 +229,9 @@ export function listFeedItems(q: FeedItemsQuery): { items: FeedItemDTO[]; nextCu
       feed: { name: r.feedName, topic: topicsOf(r)[0] ?? '' },
       row: r,
     }));
-    const ranked = recommendItems(candidates, { topicCounts, seed: seed ?? 0 });
-    return { items: ranked.slice(0, q.limit).map((c) => mapItem(c.row, topicsOf(c.row))), nextCursor: null };
-  }
-
-  if (q.sort === 'random') {
-    return { items: shuffle(rows).slice(0, q.limit).map((r) => mapItem(r, topicsOf(r))), nextCursor: null };
+    const noiseScale = q.sort === 'random' ? SHUFFLE_NOISE_SCALE : undefined;
+    const order = recommendItems(candidates, { topicCounts, seed, noiseScale });
+    return { items: order.slice(0, q.limit).map((c) => mapItem(c.row, topicsOf(c.row))), nextCursor: null };
   }
 
   const hasMore = rows.length > q.limit;
